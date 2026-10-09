@@ -1,0 +1,164 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light dark;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+html.light {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  user-select: none;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+html.dark ::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.6);
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background: rgba(71, 85, 105, 0.6);
+  border-radius: 3px;
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.8);
+}
+
+html.light ::-webkit-scrollbar-track {
+  background: rgba(241, 245, 249, 0.8);
+}
+
+html.light ::-webkit-scrollbar-thumb {
+  background: rgba(203, 213, 225, 0.8);
+  border-radius: 3px;
+}
+
+html.light ::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.9);
+}
+
+/* Canvas Grid Pattern - Dark */
+html.dark .bg-grid-pattern {
+  background-size: 24px 24px;
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+}
+
+/* Canvas Grid Pattern - Light */
+html.light .bg-grid-pattern {
+  background-size: 24px 24px;
+  background-image: 
+    linear-gradient(to right, rgba(0, 0, 0, 0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.06) 1px, transparent 1px);
+}
+
+/* Pikchr SVG Highlight Styles */
+.pikchr-interactive-canvas svg {
+  display: block;
+  max-width: none;
+  max-height: none;
+  overflow: visible;
+  transition: all 0.2s ease;
+}
+
+/* SVG Target elements: pointer-events all ensures clicking inside unfilled shapes works */
+.pikchr-interactive-canvas svg [data-pikchr-target="true"] {
+  cursor: pointer;
+  pointer-events: all !important;
+  transition: stroke 0.15s ease, stroke-width 0.15s ease, filter 0.15s ease, opacity 0.15s ease;
+}
+
+.pikchr-interactive-canvas svg [data-pikchr-target="true"]:hover:not(.pikchr-selected) {
+  filter: drop-shadow(0 0 3px rgba(59, 130, 246, 0.45));
+}
+
+/* 1. Geometry Shapes Highlight (path, circle, ellipse, rect) */
+.pikchr-interactive-canvas svg path.pikchr-selected,
+.pikchr-interactive-canvas svg circle.pikchr-selected,
+.pikchr-interactive-canvas svg ellipse.pikchr-selected,
+.pikchr-interactive-canvas svg rect.pikchr-selected {
+  stroke: #2563eb !important;
+  stroke-width: 2.5px !important;
+  filter: drop-shadow(0 0 4px rgba(37, 99, 235, 0.45)) !important;
+}
+
+/* 2. Arrowheads Highlight (polygon) */
+.pikchr-interactive-canvas svg polygon.pikchr-selected {
+  fill: #2563eb !important;
+  stroke: #2563eb !important;
+  stroke-width: 1px !important;
+}
+
+/* 3. Text Label Highlight - Crisp font styling (NO blur, NO outer stroke distortion) */
+.pikchr-interactive-canvas svg text.pikchr-selected {
+  fill: #1d4ed8 !important;
+  font-weight: 700 !important;
+  stroke: none !important;
+  filter: none !important;
+}
+
+/* Dark Theme / Dark Paper Canvas Selection Highlights */
+.canvas-paper-dark svg path.pikchr-selected,
+.canvas-paper-dark svg circle.pikchr-selected,
+.canvas-paper-dark svg ellipse.pikchr-selected,
+.canvas-paper-dark svg rect.pikchr-selected,
+html.dark .canvas-paper-transparent svg path.pikchr-selected,
+html.dark .canvas-paper-transparent svg circle.pikchr-selected,
+html.dark .canvas-paper-transparent svg ellipse.pikchr-selected,
+html.dark .canvas-paper-transparent svg rect.pikchr-selected {
+  stroke: #60a5fa !important;
+  stroke-width: 2.5px !important;
+  filter: drop-shadow(0 0 5px rgba(96, 165, 250, 0.6)) !important;
+}
+
+.canvas-paper-dark svg polygon.pikchr-selected,
+html.dark .canvas-paper-transparent svg polygon.pikchr-selected {
+  fill: #60a5fa !important;
+  stroke: #60a5fa !important;
+}
+
+.canvas-paper-dark svg text.pikchr-selected,
+html.dark .canvas-paper-transparent svg text.pikchr-selected {
+  fill: #93c5fd !important;
+  font-weight: 700 !important;
+  stroke: none !important;
+  filter: none !important;
+}
+
+.pikchr-interactive-canvas svg text {
+  font-family: 'Inter', system-ui, sans-serif !important;
+  user-select: none;
+}
+
+/* High contrast paper canvas styles */
+.canvas-paper-white {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 20px 35px -10px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+.canvas-paper-dark {
+  background: #090d16;
+  color: #f8fafc;
+  box-shadow: 0 20px 35px -10px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+.canvas-paper-transparent {
+  background: transparent;
+}
+
+
