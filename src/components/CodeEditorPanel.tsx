@@ -6,14 +6,17 @@ import {
   ChevronDown, 
   FileCode2
 } from 'lucide-react';
-import { CompileResult } from '../lib/types';
+import { CompileResult, PikchrObject, PikchrDefinition } from '../lib/types';
 import { useTranslation } from '../lib/i18n';
 
 interface CodeEditorPanelProps {
   code: string;
   onChangeCode: (newCode: string) => void;
   selectedLine: number | null;
-  onSelectLine: (line: number | null) => void;
+  selectedObjectId?: string | null;
+  objects?: PikchrObject[];
+  definitions?: PikchrDefinition[];
+  onSelectLine: (line: number | null, objId?: string) => void;
   compileResult: CompileResult;
   isExpanded: boolean;
   onToggleExpand: () => void;
@@ -26,6 +29,9 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
   code,
   onChangeCode,
   selectedLine,
+  selectedObjectId,
+  objects = [],
+  definitions = [],
   onSelectLine,
   compileResult,
   isExpanded,
@@ -46,33 +52,93 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
     }
   };
 
-  // 커서 위치 변경 시 활성 라인 동기화
+  // 커서 위치 변경 시 활성 statement 및 라인 동기화
   const handleCursorSync = (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
     const cursor = (e.target as HTMLTextAreaElement).selectionStart;
+
+    // 1. 오브젝트 목록에서 커서가 위치한 statement 탐색
+    const matchedObj = objects.find(o => 
+      o.startChar !== undefined && o.endChar !== undefined &&
+      cursor >= o.startChar && cursor <= o.endChar
+    );
+
+    if (matchedObj) {
+      onSelectLine(matchedObj.lineNumber, matchedObj.id);
+      return;
+    }
+
+    // 2. 정의(변수, 매크로 등)에서 탐색
+    const matchedDef = definitions.find(d => 
+      d.startChar !== undefined && d.endChar !== undefined &&
+      cursor >= d.startChar && cursor <= d.endChar
+    );
+
+    if (matchedDef) {
+      onSelectLine(matchedDef.lineNumber, matchedDef.id);
+      return;
+    }
+
+    // 3. Fallback: 줄 번호 계산
     let currentChars = 0;
     for (let i = 0; i < lines.length; i++) {
       currentChars += lines[i].length + 1;
       if (cursor < currentChars) {
-        onSelectLine(i + 1);
+        onSelectLine(i + 1, undefined);
         break;
       }
     }
   };
 
+  // statement 단위 텍스트 블록 선택 및 스크롤 동기화
   useEffect(() => {
-    if (selectedLine !== null && textareaRef.current) {
-      const targetLine = Math.min(Math.max(selectedLine, 1), lines.length);
-      let charCount = 0;
-      for (let i = 0; i < targetLine - 1 && i < lines.length; i++) {
-        charCount += lines[i].length + 1;
-      }
-      const lineLen = lines[targetLine - 1]?.length || 0;
-      textareaRef.current.focus();
-      textareaRef.current.setSelectionRange(charCount, charCount + lineLen);
+    if (!textareaRef.current) return;
 
-      // 선택된 라인이 가시 영역 밖이면 자동 스크롤
+    let targetStart: number | null = null;
+    let targetEnd: number | null = null;
+    let scrollLine = selectedLine || 1;
+
+    if (selectedObjectId) {
+      const targetObj = objects.find(o => o.id === selectedObjectId);
+      const targetDef = !targetObj ? definitions.find(d => d.id === selectedObjectId) : undefined;
+      const target = targetObj || targetDef;
+
+      if (target && target.startChar !== undefined && target.endChar !== undefined) {
+        targetStart = target.startChar;
+        targetEnd = target.endChar;
+        scrollLine = target.lineNumber;
+      }
+    }
+
+    if (targetStart === null && selectedLine !== null) {
+      const targetObj = objects.find(o => {
+        const endLine = o.endLineNumber || o.lineNumber;
+        return selectedLine >= o.lineNumber && selectedLine <= endLine;
+      });
+
+      if (targetObj && targetObj.startChar !== undefined && targetObj.endChar !== undefined) {
+        targetStart = targetObj.startChar;
+        targetEnd = targetObj.endChar;
+        scrollLine = targetObj.lineNumber;
+      } else {
+        const targetLine = Math.min(Math.max(selectedLine, 1), lines.length);
+        let charCount = 0;
+        for (let i = 0; i < targetLine - 1 && i < lines.length; i++) {
+          charCount += lines[i].length + 1;
+        }
+        const lineLen = lines[targetLine - 1]?.length || 0;
+        targetStart = charCount;
+        targetEnd = charCount + lineLen;
+        scrollLine = targetLine;
+      }
+    }
+
+    if (targetStart !== null && targetEnd !== null) {
+      textareaRef.current.focus();
+      textareaRef.current.setSelectionRange(targetStart, targetEnd);
+
+      // 선택된 statement 위치로 스크롤 동기화
       const lineHeight = 20; // 20px per line
-      const targetTop = (targetLine - 1) * lineHeight;
+      const targetTop = (scrollLine - 1) * lineHeight;
       const currentScroll = textareaRef.current.scrollTop;
       const clientHeight = textareaRef.current.clientHeight;
 
@@ -83,7 +149,7 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
         }
       }
     }
-  }, [selectedLine]);
+  }, [selectedLine, selectedObjectId, objects, definitions]);
 
   return (
     <div className={`bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex flex-col shrink-0 transition-all duration-200 ${
@@ -132,22 +198,22 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
         >
           {lines.map((_, idx) => {
             const lineNum = idx + 1;
-            const isSelected = selectedLine === lineNum;
+            const currentSelectedObj = selectedObjectId
+              ? (objects.find(o => o.id === selectedObjectId) || definitions.find(d => d.id === selectedObjectId))
+              : (selectedLine ? objects.find(o => lineNum >= o.lineNumber && lineNum <= (o.endLineNumber || o.lineNumber)) : null);
+
+            const isSelected = currentSelectedObj
+              ? lineNum >= currentSelectedObj.lineNumber && lineNum <= (currentSelectedObj.endLineNumber || currentSelectedObj.lineNumber)
+              : selectedLine === lineNum;
+
             const isErrorLine = !compileResult.success && compileResult.error?.line === lineNum;
 
             return (
               <div
                 key={lineNum}
                 onClick={() => {
-                  onSelectLine(lineNum);
-                  if (textareaRef.current) {
-                    let charCount = 0;
-                    for (let i = 0; i < lineNum - 1 && i < lines.length; i++) {
-                      charCount += lines[i].length + 1;
-                    }
-                    textareaRef.current.focus();
-                    textareaRef.current.setSelectionRange(charCount, charCount + (lines[lineNum - 1]?.length || 0));
-                  }
+                  const objOnLine = objects.find(o => o.lineNumber === lineNum);
+                  onSelectLine(lineNum, objOnLine?.id);
                 }}
                 style={{ height: '20px', lineHeight: '20px' }}
                 className={`cursor-pointer transition flex items-center justify-end space-x-1 h-[20px] leading-[20px] ${

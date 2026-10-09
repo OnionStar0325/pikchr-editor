@@ -990,6 +990,9 @@ export const App: React.FC = () => {
           code={code}
           onChangeCode={handleCodeChange}
           selectedLine={selectedLine}
+          selectedObjectId={selectedObjectId}
+          objects={augmentedObjects}
+          definitions={definitions}
           onSelectLine={handleSelectObject}
           compileResult={compileResult}
           isExpanded={isEditorExpanded}

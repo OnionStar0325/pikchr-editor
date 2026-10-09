@@ -72,7 +72,10 @@ export interface PikchrObject {
   labelName?: string;      // 선언 앞 레이블 식별자 (예: Server:, DB_1:)
   type: PikchrShapeType;   // 도형/오브젝트 타입
   label?: string;          // 텍스트 라벨 (따옴표 안 문자열)
-  lineNumber: number;      // 1-based 라인 번호
+  lineNumber: number;      // 1-based 시작 라인 번호
+  endLineNumber?: number;  // 1-based 끝 라인 번호
+  startChar?: number;      // 소스 내 시작 문자 위치 (0-based)
+  endChar?: number;        // 소스 내 끝 문자 위치 (0-based)
   rawStatement: string;    // 원본 코드 라인
   properties: PikchrObjectProperties;
 }
@@ -83,6 +86,9 @@ export interface PikchrDefinition {
   type: 'variable' | 'macro' | 'global_property';
   value: string;
   lineNumber: number;
+  endLineNumber?: number;
+  startChar?: number;
+  endChar?: number;
   rawStatement: string;
 }
 

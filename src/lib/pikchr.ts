@@ -174,94 +174,268 @@ export const GLOBAL_PROPERTY_NAMES = new Set([
   'thickness',
 ]);
 
+export interface ScannedStatement {
+  id: string;
+  text: string;
+  raw: string;
+  lineNumber: number;
+  endLineNumber: number;
+  startChar: number;
+  endChar: number;
+}
+
+/**
+ * 소스 코드를 문자 단위로 스캔하여 개별 문장(Statement)과 정확한 문자 위치 범위(startChar, endChar, lineNumber, endLineNumber)를 파싱
+ */
+export function scanSourceStatements(source: string): ScannedStatement[] {
+  const statements: ScannedStatement[] = [];
+  const len = source.length;
+  if (len === 0) return statements;
+
+  // 줄 번호 인덱스 테이블 구축
+  const lineStartOffsets: number[] = [0];
+  for (let idx = 0; idx < len; idx++) {
+    if (source[idx] === '\n') {
+      lineStartOffsets.push(idx + 1);
+    }
+  }
+
+  const getLineFromCharIndex = (charIdx: number): number => {
+    let low = 0, high = lineStartOffsets.length - 1;
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      if (lineStartOffsets[mid] <= charIdx) {
+        if (mid === lineStartOffsets.length - 1 || lineStartOffsets[mid + 1] > charIdx) {
+          return mid + 1;
+        }
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+    return 1;
+  };
+
+  let i = 0;
+  let stmtStart = 0;
+  let inString = false;
+  let inSingleComment = false;
+  let inMultiComment = false;
+  let braceDepth = 0;
+
+  const pushStatement = (startIdx: number, endIdx: number) => {
+    if (startIdx >= endIdx) return;
+
+    let actualStart = startIdx;
+    while (actualStart < endIdx && /\s/.test(source[actualStart])) {
+      actualStart++;
+    }
+    let actualEnd = endIdx;
+    while (actualEnd > actualStart && /\s/.test(source[actualEnd - 1])) {
+      actualEnd--;
+    }
+
+    if (actualStart >= actualEnd) return;
+
+    const raw = source.substring(actualStart, actualEnd);
+    const trimmed = raw.trim();
+    if (trimmed.startsWith('#') || trimmed.startsWith('//') || trimmed.startsWith('/*')) {
+      return;
+    }
+
+    const startLine = getLineFromCharIndex(actualStart);
+    const endLine = getLineFromCharIndex(actualEnd - 1);
+    const id = `stmt_${startLine}_${actualStart}`;
+    const cleanedText = raw.replace(/\\[ \t]*\r?\n[ \t]*/g, ' ').trim();
+
+    statements.push({
+      id,
+      text: cleanedText,
+      raw,
+      lineNumber: startLine,
+      endLineNumber: endLine,
+      startChar: actualStart,
+      endChar: actualEnd,
+    });
+  };
+
+  while (i < len) {
+    const ch = source[i];
+    const nextCh = i + 1 < len ? source[i + 1] : '';
+
+    if (inSingleComment) {
+      if (ch === '\n') {
+        inSingleComment = false;
+        if (braceDepth === 0) {
+          pushStatement(stmtStart, i);
+          stmtStart = i + 1;
+        }
+      }
+      i++;
+      continue;
+    }
+
+    if (inMultiComment) {
+      if (ch === '*' && nextCh === '/') {
+        inMultiComment = false;
+        i += 2;
+        continue;
+      }
+      i++;
+      continue;
+    }
+
+    if (inString) {
+      if (ch === '\\' && nextCh === '"') {
+        i += 2;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+      }
+      i++;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      i++;
+      continue;
+    }
+
+    if (ch === '/' && nextCh === '/') {
+      inSingleComment = true;
+      i += 2;
+      continue;
+    }
+
+    if (ch === '#') {
+      inSingleComment = true;
+      i++;
+      continue;
+    }
+
+    if (ch === '/' && nextCh === '*') {
+      inMultiComment = true;
+      i += 2;
+      continue;
+    }
+
+    if (ch === '{') {
+      braceDepth++;
+      i++;
+      continue;
+    }
+
+    if (ch === '}') {
+      if (braceDepth > 0) {
+        braceDepth--;
+        if (braceDepth === 0) {
+          pushStatement(stmtStart, i + 1);
+          stmtStart = i + 1;
+        }
+      }
+      i++;
+      continue;
+    }
+
+    if (braceDepth === 0) {
+      if (ch === ';') {
+        pushStatement(stmtStart, i);
+        stmtStart = i + 1;
+        i++;
+        continue;
+      }
+
+      if (ch === '\\') {
+        let j = i + 1;
+        let isContinuation = false;
+        while (j < len && source[j] !== '\n') {
+          if (source[j] === '#' || (source[j] === '/' && source[j + 1] === '/')) {
+            isContinuation = true;
+            break;
+          }
+          if (!/\s/.test(source[j])) {
+            break;
+          }
+          j++;
+        }
+        if (j === len || source[j] === '\n' || isContinuation) {
+          while (j < len && source[j] !== '\n') j++;
+          if (j < len && source[j] === '\n') j++;
+          i = j;
+          continue;
+        }
+      }
+
+      if (ch === '\n') {
+        pushStatement(stmtStart, i);
+        stmtStart = i + 1;
+        i++;
+        continue;
+      }
+    }
+
+    i++;
+  }
+
+  if (stmtStart < len) {
+    pushStatement(stmtStart, len);
+  }
+
+  return statements;
+}
+
 /**
  * 소스 코드를 파싱하여 정의(변수, 매크로, scale 등) 목록 추출
  */
 export function parseDefinitionsFromSource(source: string): PikchrDefinition[] {
-  const lines = source.split('\n');
+  const scanned = scanSourceStatements(source);
   const definitions: PikchrDefinition[] = [];
 
-  let inMacro = false;
-  let currentMacroName = '';
-  let currentMacroBody: string[] = [];
-  let macroStartLine = 0;
+  scanned.forEach(stmt => {
+    const trimmed = stmt.text.trim();
+    if (!trimmed) return;
 
-  lines.forEach((line, index) => {
-    const lineNumber = index + 1;
-    const trimmed = line.trim();
-
-    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//') || trimmed.startsWith('/*')) {
+    // 1. 매크로 정의: define macroname { ... }
+    const macroStartMatch = trimmed.match(/^define\s+([a-zA-Z0-9_]+)\s*\{([\s\S]*)\}$/i);
+    if (macroStartMatch) {
+      const macroName = macroStartMatch[1];
+      const body = macroStartMatch[2].trim();
+      definitions.push({
+        id: `macro_${macroName}_${stmt.lineNumber}`,
+        name: macroName,
+        type: 'macro',
+        value: body,
+        lineNumber: stmt.lineNumber,
+        endLineNumber: stmt.endLineNumber,
+        startChar: stmt.startChar,
+        endChar: stmt.endChar,
+        rawStatement: stmt.raw,
+      });
       return;
     }
 
-    // 1. 매크로 정의: define macroname { ... } (단일행 및 복수행 지원)
-    if (!inMacro) {
-      const macroStartMatch = trimmed.match(/^define\s+([a-zA-Z0-9_]+)\s*\{([\s\S]*)$/i);
-      if (macroStartMatch) {
-        currentMacroName = macroStartMatch[1];
-        macroStartLine = lineNumber;
-        const rest = macroStartMatch[2];
-        if (rest.includes('}')) {
-          const body = rest.substring(0, rest.indexOf('}')).trim();
-          definitions.push({
-            id: `macro_${currentMacroName}_${lineNumber}`,
-            name: currentMacroName,
-            type: 'macro',
-            value: body,
-            lineNumber,
-            rawStatement: line,
-          });
-        } else {
-          inMacro = true;
-          currentMacroBody = rest.trim() ? [rest.trim()] : [];
-        }
-        return;
-      }
-    } else {
-      if (trimmed.includes('}')) {
-        const endIdx = trimmed.indexOf('}');
-        const beforeEnd = trimmed.substring(0, endIdx).trim();
-        if (beforeEnd) currentMacroBody.push(beforeEnd);
-        definitions.push({
-          id: `macro_${currentMacroName}_${macroStartLine}`,
-          name: currentMacroName,
-          type: 'macro',
-          value: currentMacroBody.join('\n'),
-          lineNumber: macroStartLine,
-          rawStatement: `define ${currentMacroName} { ... }`,
-        });
-        inMacro = false;
-        currentMacroName = '';
-        currentMacroBody = [];
-      } else {
-        currentMacroBody.push(trimmed);
-      }
-      return;
-    }
+    // 2. 변수 / 전역 프로퍼티 대입문 (=, *=, +=, -=, /=)
+    const varMatch = trimmed.match(/^([$@a-zA-Z][a-zA-Z0-9_]*)\s*([+\-*/]?=)\s*(.+)$/);
+    if (varMatch) {
+      const varName = varMatch[1];
+      const op = varMatch[2];
+      const rawVal = varMatch[3].trim();
+      const value = op === '=' ? rawVal : `${op} ${rawVal}`;
+      const isGlobalProp = GLOBAL_PROPERTY_NAMES.has(varName.toLowerCase());
 
-    // 2. 변수 / 전역 프로퍼티 대입문 (=, *=, +=, -=, /=) 파싱 (세미콜론 복수 문장 분리 지원)
-    const stmts = splitStatements(trimmed);
-    for (const stmt of stmts) {
-      const stmtTrimmed = stmt.trim();
-      if (!stmtTrimmed) continue;
-
-      const varMatch = stmtTrimmed.match(/^([$@a-zA-Z][a-zA-Z0-9_]*)\s*([+\-*/]?=)\s*(.+)$/);
-      if (varMatch) {
-        const varName = varMatch[1];
-        const op = varMatch[2];
-        const rawVal = varMatch[3].trim();
-        const value = op === '=' ? rawVal : `${op} ${rawVal}`;
-        const isGlobalProp = GLOBAL_PROPERTY_NAMES.has(varName.toLowerCase());
-
-        definitions.push({
-          id: `var_${varName}_${lineNumber}_${definitions.length}`,
-          name: varName,
-          type: isGlobalProp ? 'global_property' : 'variable',
-          value,
-          lineNumber,
-          rawStatement: stmtTrimmed,
-        });
-      }
+      definitions.push({
+        id: `var_${varName}_${stmt.lineNumber}_${definitions.length}`,
+        name: varName,
+        type: isGlobalProp ? 'global_property' : 'variable',
+        value,
+        lineNumber: stmt.lineNumber,
+        endLineNumber: stmt.endLineNumber,
+        startChar: stmt.startChar,
+        endChar: stmt.endChar,
+        rawStatement: stmt.raw,
+      });
     }
   });
 
@@ -291,131 +465,61 @@ export function splitStatements(line: string): string[] {
   return statements;
 }
 
-interface LogicalLine {
-  text: string;
-  lineNumber: number;
-  raw: string;
-}
-
-interface ExpandedStatement {
+export interface ExpandedStatement {
   id: string;
   text: string;
+  raw: string;
   lineNumber: number;
-  raw?: string;
+  endLineNumber: number;
+  startChar: number;
+  endChar: number;
 }
 
 /**
  * 매크로(define ... { ... }) 추출 및 논리행 병합, 세미콜론 분리, 매크로 호출 인라인 확장을 수행
  */
 function getExpandedStatements(source: string): ExpandedStatement[] {
-  const rawLines = source.split('\n');
+  const scanned = scanSourceStatements(source);
   const macros = new Map<string, string[]>();
-  let inMacro = false;
-  let currentMacroName = '';
-  let currentMacroLines: string[] = [];
 
-  const nonMacroLines: { text: string; lineNumber: number; raw: string }[] = [];
-
-  rawLines.forEach((rawLine, idx) => {
-    const lineNum = idx + 1;
-    const trimmed = rawLine.trim();
-
-    if (!inMacro) {
-      const macroStartMatch = trimmed.match(/^define\s+([a-zA-Z0-9_]+)\s*\{([\s\S]*)$/i);
-      if (macroStartMatch) {
-        currentMacroName = macroStartMatch[1];
-        const rest = macroStartMatch[2];
-        if (rest.includes('}')) {
-          const body = rest.substring(0, rest.indexOf('}')).trim();
-          macros.set(currentMacroName, splitStatements(body));
-        } else {
-          inMacro = true;
-          currentMacroLines = rest.trim() ? [rest.trim()] : [];
-        }
-        return;
-      }
-    } else {
-      if (trimmed.includes('}')) {
-        const endIdx = trimmed.indexOf('}');
-        const beforeEnd = trimmed.substring(0, endIdx).trim();
-        if (beforeEnd) currentMacroLines.push(beforeEnd);
-        const allMacroStmts: string[] = [];
-        for (const mLine of currentMacroLines) {
-          allMacroStmts.push(...splitStatements(mLine));
-        }
-        macros.set(currentMacroName, allMacroStmts);
-        inMacro = false;
-        currentMacroName = '';
-        currentMacroLines = [];
-      } else {
-        currentMacroLines.push(trimmed);
-      }
-      return;
-    }
-
-    nonMacroLines.push({ text: trimmed, lineNumber: lineNum, raw: rawLine });
-  });
-
-  // 백슬래시(\) 연속행 논리행으로 병합
-  const logicalLines: { text: string; lineNumber: number; raw: string }[] = [];
-  let currentText = '';
-  let currentRaw = '';
-  let startLine = 1;
-  let inContinuation = false;
-
-  nonMacroLines.forEach(({ text: trimmed, lineNumber: lineNum, raw: rawLine }) => {
-    if (!inContinuation && (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//') || trimmed.startsWith('/*'))) {
-      return;
-    }
-
-    if (inContinuation) {
-      currentRaw += '\n' + rawLine;
-      if (trimmed.endsWith('\\')) {
-        currentText += ' ' + trimmed.slice(0, -1).trim();
-      } else {
-        currentText += ' ' + trimmed;
-        logicalLines.push({ text: currentText.trim(), lineNumber: startLine, raw: currentRaw });
-        currentText = '';
-        currentRaw = '';
-        inContinuation = false;
-      }
-    } else {
-      if (trimmed.endsWith('\\')) {
-        startLine = lineNum;
-        currentText = trimmed.slice(0, -1).trim();
-        currentRaw = rawLine;
-        inContinuation = true;
-      } else {
-        logicalLines.push({ text: trimmed, lineNumber: lineNum, raw: rawLine });
-      }
+  scanned.forEach(stmt => {
+    const macroMatch = stmt.text.match(/^define\s+([a-zA-Z0-9_]+)\s*\{([\s\S]*)\}$/i);
+    if (macroMatch) {
+      const name = macroMatch[1];
+      const body = macroMatch[2].trim();
+      macros.set(name, splitStatements(body));
     }
   });
-  if (inContinuation && currentText) {
-    logicalLines.push({ text: currentText.trim(), lineNumber: startLine, raw: currentRaw });
-  }
 
-  // 세미콜론 분리 및 매크로 확장 (각 문장마다 고유하고 결정론적인 식별자 생성)
   const expanded: ExpandedStatement[] = [];
-  for (const { text, lineNumber, raw } of logicalLines) {
-    const stmts = splitStatements(text);
-    let sIdx = 0;
-    for (const stmt of stmts) {
-      const s = stmt.trim();
-      if (!s) continue;
-      sIdx++;
-      const id = `obj_${lineNumber}_${sIdx}`;
-      if (macros.has(s)) {
-        const macroStmts = macros.get(s)!;
-        let mIdx = 0;
-        for (const mStmt of macroStmts) {
-          mIdx++;
-          expanded.push({ id: `${id}_m${mIdx}`, text: mStmt, lineNumber, raw: mStmt });
-        }
-      } else {
-        expanded.push({ id, text: s, lineNumber, raw: stmts.length === 1 ? raw : s });
-      }
+  scanned.forEach((stmt, idx) => {
+    const s = stmt.text.trim();
+    if (!s) return;
+    if (macros.has(s)) {
+      const macroStmts = macros.get(s)!;
+      macroStmts.forEach((mStmt, mIdx) => {
+        expanded.push({
+          id: `${stmt.id}_m${mIdx + 1}`,
+          text: mStmt,
+          raw: mStmt,
+          lineNumber: stmt.lineNumber,
+          endLineNumber: stmt.endLineNumber,
+          startChar: stmt.startChar,
+          endChar: stmt.endChar,
+        });
+      });
+    } else {
+      expanded.push({
+        id: `obj_${stmt.lineNumber}_${idx + 1}`,
+        text: stmt.text,
+        raw: stmt.raw,
+        lineNumber: stmt.lineNumber,
+        endLineNumber: stmt.endLineNumber,
+        startChar: stmt.startChar,
+        endChar: stmt.endChar,
+      });
     }
-  }
+  });
 
   return expanded;
 }
@@ -427,10 +531,8 @@ export function parseObjectsFromSource(source: string): PikchrObject[] {
   const expanded = getExpandedStatements(source);
   const objects: PikchrObject[] = [];
   let unnamedVisualCount = 0;
-  let unnamedDirCount = 0;
-  let unnamedMoveCount = 0;
 
-  expanded.forEach(({ id, text, lineNumber, raw }) => {
+  expanded.forEach(({ id, text, lineNumber, endLineNumber, startChar, endChar, raw }) => {
     const trimmed = text.trim();
 
     if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//') || trimmed.startsWith('/*')) {
@@ -647,6 +749,9 @@ export function parseObjectsFromSource(source: string): PikchrObject[] {
       type: matchedType,
       label: labelText,
       lineNumber,
+      endLineNumber,
+      startChar,
+      endChar,
       rawStatement: raw || text,
       properties,
     });
