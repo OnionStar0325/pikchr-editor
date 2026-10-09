@@ -2,12 +2,12 @@
 
 [English](README_EN.md) | [한국어](README.md)
 
-Pikchr 마크업 언어를 직관적으로 확인하고 생성 및 수정하기 위한 시각화 웹 에디터입니다.
+[Pikchr](https://pikchr.org) 마크업 언어를 직관적으로 확인하고 생성 및 수정하기 위한 시각화 웹 에디터입니다.
 본 프로젝트는 Google Antigravity를 사용하여 생성 및 개발되었습니다.
 
 ## 1. 개요 및 목적
 
-Pikchr(다이어그램 생성용 PIC 언어의 파생 마크업) 스크립트를 작성할 때, 텍스트 편집과 실시간 렌더링, 시각적 속성 인스펙터를 연동하여 다이어그램을 신속하게 설계하고 수정할 수 있도록 지원합니다.
+[Pikchr](https://pikchr.org)(다이어그램 생성용 PIC 언어의 파생 마크업) 스크립트를 작성할 때, 텍스트 편집과 실시간 렌더링, 시각적 속성 인스펙터를 연동하여 다이어그램을 신속하게 설계하고 수정할 수 있도록 지원합니다.
 
 ## 2. 동작 환경 (OS Compatibility)
 
@@ -39,12 +39,12 @@ Pikchr(다이어그램 생성용 PIC 언어의 파생 마크업) 스크립트를
 
 1. **상단 메뉴 바 (Top Menu Bar)**
    - 파일 관리(새 문서, 전체 코드 클립보드 복사, SVG/PNG 내보내기)
-   - 편집(Undo, Redo, 전체 지우기), 예제 템플릿 로드, 다국어 전환(KO/EN/JA), 테마 전환(Dark/Light)
+   - 편집(Undo, Redo, 전체 지우기), 예제 템플릿 로드([공식 예제 출처](https://pikchr.org/home/doc/trunk/doc/examples.md)), 다국어 전환(KO/EN/JA), 테마 전환(Dark/Light)
 2. **좌측 팔레트 (Palette & Definitions Sidebar)**
    - 기본 오브젝트(box, circle, cylinder, diamond, ellipse, file 등) 및 스니펫 원클릭 삽입
    - 스크립트 내 정의된 변수 및 매크로(`define`) 목록 표시
 3. **중앙 캔버스 (Center Stage)**
-   - Pikchr 스크립트의 SVG 실시간 렌더링
+   - [Pikchr](https://pikchr.org) 스크립트의 SVG 실시간 렌더링
    - 마우스 드래그를 통한 뷰 이동(Pan) 및 휠 스크롤을 통한 확대/축소(Zoom)
    - 요소 클릭 시 해당 코드 라인 및 속성 인스펙터 자동 포커스
    - 화살표/선분의 타겟 지정 모드 시 캔버스 내 기준점(Anchor) 직접 선택 지원
@@ -88,6 +88,7 @@ npm run build
 ```
 빌드 산출물은 `dist/` 디렉토리에 생성됩니다.
 
-## 6. 라이선스
+## 6. 라이선스 및 출처
 
-본 프로젝트는 [MIT License](LICENSE) 하에 배포됩니다.
+- **라이선스**: 본 프로젝트는 [MIT License](LICENSE) 하에 배포됩니다.
+- **예제 출처**: 에디터에 내장된 다이어그램 예제(Examples)는 [Pikchr 공식 예제 문서](https://pikchr.org/home/doc/trunk/doc/examples.md)를 기반으로 작성되었습니다.
