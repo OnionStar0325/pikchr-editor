@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { 
   AlertCircle, 
   CheckCircle2, 
@@ -8,6 +8,11 @@ import {
 } from 'lucide-react';
 import { CompileResult, PikchrObject, PikchrDefinition } from '../lib/types';
 import { useTranslation } from '../lib/i18n';
+import { AutocompletePopover } from './AutocompletePopover';
+import { analyzeAutocompleteContext } from '../lib/autocomplete/contextAnalyzer';
+import { getCompletions } from '../lib/autocomplete/completionEngine';
+import { getCaretCoordinates } from '../lib/autocomplete/caretPosition';
+import { CompletionItem, AutocompleteState } from '../lib/autocomplete/types';
 
 interface CodeEditorPanelProps {
   code: string;
@@ -44,8 +49,18 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lineNumbersRef = useRef<HTMLDivElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
+  const editorContainerRef = useRef<HTMLDivElement>(null);
   const isInternalEditorChangeRef = useRef(false);
   const lines = code.split('\n');
+
+  // 자동완성 상태 관리
+  const [autocomplete, setAutocomplete] = useState<AutocompleteState>({
+    isOpen: false,
+    items: [],
+    selectedIndex: 0,
+    context: null,
+    position: { top: 0, left: 0, lineHeight: 20 },
+  });
 
   // 현재 선택된 객체 및 하이라이트할 라인 범위 계산
   const currentSelectedObj = selectedObjectId
@@ -71,6 +86,12 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
       if (highlightRef.current) {
         highlightRef.current.scrollTop = top;
         highlightRef.current.scrollLeft = left;
+      }
+      // 스크롤 시 자동완성 팝업 위치 동기화 또는 닫기
+      if (autocomplete.isOpen && textareaRef.current) {
+        const cursor = textareaRef.current.selectionStart;
+        const pos = getCaretCoordinates(textareaRef.current, cursor);
+        setAutocomplete(prev => ({ ...prev, position: pos }));
       }
     }
   };
@@ -117,6 +138,65 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
         break;
       }
     }
+  };
+
+  // 자동완성 문맥 분석 및 팝오버 갱신
+  const updateAutocomplete = (text: string, cursorPos: number) => {
+    if (!textareaRef.current) return;
+
+    const ctx = analyzeAutocompleteContext(text, cursorPos);
+    if (!ctx) {
+      setAutocomplete(prev => ({ ...prev, isOpen: false }));
+      return;
+    }
+
+    // 1글자 이상 입력되었거나 점(.)/색상/경로 문맥인 경우에만 자동 팝업
+    const shouldTrigger = 
+      ctx.prefix.length > 0 || 
+      ctx.contextType === 'dot' || 
+      ctx.contextType === 'color';
+
+    if (!shouldTrigger) {
+      setAutocomplete(prev => ({ ...prev, isOpen: false }));
+      return;
+    }
+
+    const completions = getCompletions(ctx, objects, definitions);
+    if (completions.length === 0) {
+      setAutocomplete(prev => ({ ...prev, isOpen: false }));
+      return;
+    }
+
+    const pos = getCaretCoordinates(textareaRef.current, cursorPos);
+
+    setAutocomplete({
+      isOpen: true,
+      items: completions,
+      selectedIndex: 0,
+      context: ctx,
+      position: pos,
+    });
+  };
+
+  // 자동완성 항목 적용 (Insert)
+  const handleApplyCompletion = (item: CompletionItem) => {
+    if (!autocomplete.context || !textareaRef.current) return;
+    const { replaceStart, replaceEnd } = autocomplete.context;
+
+    const newCode = code.substring(0, replaceStart) + item.insertText + code.substring(replaceEnd);
+    onChangeCode(newCode);
+
+    const newCursor = replaceStart + (item.cursorOffset !== undefined ? item.cursorOffset : item.insertText.length);
+
+    setAutocomplete(prev => ({ ...prev, isOpen: false }));
+
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        textareaRef.current.setSelectionRange(newCursor, newCursor);
+      }
+      if (onCommitHistory) onCommitHistory();
+    }, 0);
   };
 
   // statement 단위 스크롤 동기화 (네이티브 텍스트 selectionRange는 실행하지 않고 시각적 하이라이트만 제공)
@@ -224,7 +304,10 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
         </div>
 
         {/* Textarea Code Input (줄바꿈 방지 및 20px 정확한 줄높이 일치, 시각적 하이라이트 오버레이 포함) */}
-        <div className="flex-1 relative bg-white dark:bg-slate-900/90 overflow-hidden">
+        <div 
+          ref={editorContainerRef}
+          className="flex-1 relative bg-white dark:bg-slate-900/90 overflow-hidden"
+        >
           {/* 시각적 배경 하이라이트 레이어 (텍스트 셀렉션을 유발하지 않고 부드러운 강조 표시) */}
           <div
             ref={highlightRef}
@@ -257,12 +340,93 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
             value={code}
             onChange={(e) => {
               isInternalEditorChangeRef.current = true;
-              onChangeCode(e.target.value);
+              const val = e.target.value;
+              const cursor = e.target.selectionStart;
+              onChangeCode(val);
+              updateAutocomplete(val, cursor);
             }}
-            onClick={handleCursorSync}
-            onKeyUp={handleCursorSync}
+            onClick={(e) => {
+              handleCursorSync(e);
+              const cursor = (e.target as HTMLTextAreaElement).selectionStart;
+              updateAutocomplete(code, cursor);
+            }}
+            onKeyUp={(e) => {
+              if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+                handleCursorSync(e);
+                const cursor = (e.target as HTMLTextAreaElement).selectionStart;
+                updateAutocomplete(code, cursor);
+              }
+            }}
             onKeyDown={(e) => {
               isInternalEditorChangeRef.current = true;
+
+              // 수동 호출 단축키: Ctrl+Space 또는 Cmd+Space
+              if ((e.ctrlKey || e.metaKey) && e.code === 'Space') {
+                e.preventDefault();
+                const cursor = e.currentTarget.selectionStart;
+                const ctx = analyzeAutocompleteContext(code, cursor);
+                if (ctx) {
+                  const completions = getCompletions(ctx, objects, definitions);
+                  if (completions.length > 0 && textareaRef.current) {
+                    const pos = getCaretCoordinates(textareaRef.current, cursor);
+                    setAutocomplete({
+                      isOpen: true,
+                      items: completions,
+                      selectedIndex: 0,
+                      context: ctx,
+                      position: pos,
+                    });
+                  }
+                }
+                return;
+              }
+
+              // 자동완성 팝오버 열려있을 때 키보드 조작 가로채기
+              if (autocomplete.isOpen && autocomplete.items.length > 0) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setAutocomplete(prev => ({
+                    ...prev,
+                    selectedIndex: (prev.selectedIndex + 1) % prev.items.length,
+                  }));
+                  return;
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setAutocomplete(prev => ({
+                    ...prev,
+                    selectedIndex: (prev.selectedIndex - 1 + prev.items.length) % prev.items.length,
+                  }));
+                  return;
+                }
+                if (e.key === 'Enter' || e.key === 'Tab') {
+                  e.preventDefault();
+                  handleApplyCompletion(autocomplete.items[autocomplete.selectedIndex]);
+                  return;
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setAutocomplete(prev => ({ ...prev, isOpen: false }));
+                  return;
+                }
+                if (e.key === 'PageDown') {
+                  e.preventDefault();
+                  setAutocomplete(prev => ({
+                    ...prev,
+                    selectedIndex: Math.min(prev.items.length - 1, prev.selectedIndex + 5),
+                  }));
+                  return;
+                }
+                if (e.key === 'PageUp') {
+                  e.preventDefault();
+                  setAutocomplete(prev => ({
+                    ...prev,
+                    selectedIndex: Math.max(0, prev.selectedIndex - 5),
+                  }));
+                  return;
+                }
+              }
+
               if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
                 e.preventDefault();
                 if (e.shiftKey) {
@@ -282,6 +446,10 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
               }
             }}
             onBlur={() => {
+              // 팝오버 클릭 이벤트 처리를 위해 약간의 지연 후 닫기
+              setTimeout(() => {
+                setAutocomplete(prev => ({ ...prev, isOpen: false }));
+              }, 150);
               if (onCommitHistory) onCommitHistory();
             }}
             onScroll={handleScroll}
@@ -290,6 +458,17 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
             placeholder={t.editor.placeholder}
             style={{ lineHeight: '20px' }}
             className="w-full h-full p-2.5 bg-transparent text-slate-900 dark:text-slate-100 placeholder-slate-400 font-mono text-xs resize-none focus:outline-none leading-[20px] overflow-auto whitespace-pre relative z-10"
+          />
+
+          {/* 키워드 및 스니펫 자동완성 팝오버 */}
+          <AutocompletePopover
+            isOpen={autocomplete.isOpen}
+            items={autocomplete.items}
+            selectedIndex={autocomplete.selectedIndex}
+            position={autocomplete.position}
+            onSelect={handleApplyCompletion}
+            onClose={() => setAutocomplete(prev => ({ ...prev, isOpen: false }))}
+            containerRef={editorContainerRef}
           />
         </div>
       </div>
@@ -313,3 +492,4 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
     </div>
   );
 };
+
