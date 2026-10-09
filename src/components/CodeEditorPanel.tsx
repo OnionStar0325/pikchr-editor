@@ -43,17 +43,41 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
   const { t } = useTranslation();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lineNumbersRef = useRef<HTMLDivElement>(null);
+  const highlightRef = useRef<HTMLDivElement>(null);
+  const isInternalEditorChangeRef = useRef(false);
   const lines = code.split('\n');
 
-  // 스크롤 동기화: 텍스트 영역 스크롤 시 라인 번호 영역 동시 스크롤
+  // 현재 선택된 객체 및 하이라이트할 라인 범위 계산
+  const currentSelectedObj = selectedObjectId
+    ? (objects.find(o => o.id === selectedObjectId) || definitions.find(d => d.id === selectedObjectId))
+    : (selectedLine ? objects.find(o => selectedLine >= o.lineNumber && selectedLine <= (o.endLineNumber || o.lineNumber)) : null);
+
+  const selectedStartLine = currentSelectedObj
+    ? currentSelectedObj.lineNumber
+    : selectedLine;
+
+  const selectedEndLine = currentSelectedObj
+    ? (currentSelectedObj.endLineNumber || currentSelectedObj.lineNumber)
+    : selectedLine;
+
+  // 스크롤 동기화: 텍스트 영역 스크롤 시 라인 번호 영역 및 하이라이트 배경 레이어 동시 스크롤
   const handleScroll = () => {
-    if (textareaRef.current && lineNumbersRef.current) {
-      lineNumbersRef.current.scrollTop = textareaRef.current.scrollTop;
+    if (textareaRef.current) {
+      const top = textareaRef.current.scrollTop;
+      const left = textareaRef.current.scrollLeft;
+      if (lineNumbersRef.current) {
+        lineNumbersRef.current.scrollTop = top;
+      }
+      if (highlightRef.current) {
+        highlightRef.current.scrollTop = top;
+        highlightRef.current.scrollLeft = left;
+      }
     }
   };
 
-  // 커서 위치 변경 시 활성 statement 및 라인 동기화
+  // 커서 위치 변경 시 활성 statement 및 라인 동기화 (네이티브 셀렉션은 건드리지 않음)
   const handleCursorSync = (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
+    isInternalEditorChangeRef.current = true;
     const cursor = (e.target as HTMLTextAreaElement).selectionStart;
 
     // 1. 오브젝트 목록에서 커서가 위치한 statement 탐색
@@ -63,7 +87,9 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
     );
 
     if (matchedObj) {
-      onSelectLine(matchedObj.lineNumber, matchedObj.id);
+      if (matchedObj.id !== selectedObjectId || matchedObj.lineNumber !== selectedLine) {
+        onSelectLine(matchedObj.lineNumber, matchedObj.id);
+      }
       return;
     }
 
@@ -74,7 +100,9 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
     );
 
     if (matchedDef) {
-      onSelectLine(matchedDef.lineNumber, matchedDef.id);
+      if (matchedDef.id !== selectedObjectId || matchedDef.lineNumber !== selectedLine) {
+        onSelectLine(matchedDef.lineNumber, matchedDef.id);
+      }
       return;
     }
 
@@ -83,73 +111,42 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
     for (let i = 0; i < lines.length; i++) {
       currentChars += lines[i].length + 1;
       if (cursor < currentChars) {
-        onSelectLine(i + 1, undefined);
+        if (selectedLine !== i + 1 || selectedObjectId !== undefined) {
+          onSelectLine(i + 1, undefined);
+        }
         break;
       }
     }
   };
 
-  // statement 단위 텍스트 블록 선택 및 스크롤 동기화
+  // statement 단위 스크롤 동기화 (네이티브 텍스트 selectionRange는 실행하지 않고 시각적 하이라이트만 제공)
   useEffect(() => {
     if (!textareaRef.current) return;
 
-    let targetStart: number | null = null;
-    let targetEnd: number | null = null;
-    let scrollLine = selectedLine || 1;
-
-    if (selectedObjectId) {
-      const targetObj = objects.find(o => o.id === selectedObjectId);
-      const targetDef = !targetObj ? definitions.find(d => d.id === selectedObjectId) : undefined;
-      const target = targetObj || targetDef;
-
-      if (target && target.startChar !== undefined && target.endChar !== undefined) {
-        targetStart = target.startChar;
-        targetEnd = target.endChar;
-        scrollLine = target.lineNumber;
-      }
+    if (isInternalEditorChangeRef.current) {
+      isInternalEditorChangeRef.current = false;
+      return;
     }
 
-    if (targetStart === null && selectedLine !== null) {
-      const targetObj = objects.find(o => {
-        const endLine = o.endLineNumber || o.lineNumber;
-        return selectedLine >= o.lineNumber && selectedLine <= endLine;
-      });
-
-      if (targetObj && targetObj.startChar !== undefined && targetObj.endChar !== undefined) {
-        targetStart = targetObj.startChar;
-        targetEnd = targetObj.endChar;
-        scrollLine = targetObj.lineNumber;
-      } else {
-        const targetLine = Math.min(Math.max(selectedLine, 1), lines.length);
-        let charCount = 0;
-        for (let i = 0; i < targetLine - 1 && i < lines.length; i++) {
-          charCount += lines[i].length + 1;
-        }
-        const lineLen = lines[targetLine - 1]?.length || 0;
-        targetStart = charCount;
-        targetEnd = charCount + lineLen;
-        scrollLine = targetLine;
-      }
-    }
-
-    if (targetStart !== null && targetEnd !== null) {
-      textareaRef.current.focus();
-      textareaRef.current.setSelectionRange(targetStart, targetEnd);
-
-      // 선택된 statement 위치로 스크롤 동기화
+    if (selectedStartLine !== null) {
+      const scrollLine = selectedStartLine;
       const lineHeight = 20; // 20px per line
       const targetTop = (scrollLine - 1) * lineHeight;
       const currentScroll = textareaRef.current.scrollTop;
       const clientHeight = textareaRef.current.clientHeight;
 
       if (targetTop < currentScroll || targetTop > currentScroll + clientHeight - 40) {
-        textareaRef.current.scrollTop = Math.max(0, targetTop - Math.floor(clientHeight / 2));
+        const nextScrollTop = Math.max(0, targetTop - Math.floor(clientHeight / 2));
+        textareaRef.current.scrollTop = nextScrollTop;
         if (lineNumbersRef.current) {
-          lineNumbersRef.current.scrollTop = textareaRef.current.scrollTop;
+          lineNumbersRef.current.scrollTop = nextScrollTop;
+        }
+        if (highlightRef.current) {
+          highlightRef.current.scrollTop = nextScrollTop;
         }
       }
     }
-  }, [selectedLine, selectedObjectId, objects, definitions]);
+  }, [selectedLine, selectedObjectId, objects, definitions, selectedStartLine]);
 
   return (
     <div className={`bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex flex-col shrink-0 transition-all duration-200 ${
@@ -198,13 +195,8 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
         >
           {lines.map((_, idx) => {
             const lineNum = idx + 1;
-            const currentSelectedObj = selectedObjectId
-              ? (objects.find(o => o.id === selectedObjectId) || definitions.find(d => d.id === selectedObjectId))
-              : (selectedLine ? objects.find(o => lineNum >= o.lineNumber && lineNum <= (o.endLineNumber || o.lineNumber)) : null);
-
-            const isSelected = currentSelectedObj
-              ? lineNum >= currentSelectedObj.lineNumber && lineNum <= (currentSelectedObj.endLineNumber || currentSelectedObj.lineNumber)
-              : selectedLine === lineNum;
+            const isSelected = selectedStartLine !== null && selectedEndLine !== null &&
+              lineNum >= selectedStartLine && lineNum <= selectedEndLine;
 
             const isErrorLine = !compileResult.success && compileResult.error?.line === lineNum;
 
@@ -231,16 +223,46 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
           })}
         </div>
 
-        {/* Textarea Code Input (줄바꿈 방지 및 20px 정확한 줄높이 일치) */}
+        {/* Textarea Code Input (줄바꿈 방지 및 20px 정확한 줄높이 일치, 시각적 하이라이트 오버레이 포함) */}
         <div className="flex-1 relative bg-white dark:bg-slate-900/90 overflow-hidden">
+          {/* 시각적 배경 하이라이트 레이어 (텍스트 셀렉션을 유발하지 않고 부드러운 강조 표시) */}
+          <div
+            ref={highlightRef}
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 py-2.5 px-2.5 font-mono text-xs overflow-hidden select-none"
+          >
+            {lines.map((_, idx) => {
+              const lineNum = idx + 1;
+              const isHighlighted = selectedStartLine !== null && selectedEndLine !== null &&
+                lineNum >= selectedStartLine && lineNum <= selectedEndLine;
+
+              return (
+                <div
+                  key={lineNum}
+                  style={{ height: '20px', lineHeight: '20px' }}
+                  className={`h-[20px] leading-[20px] -mx-2.5 px-2.5 transition-colors ${
+                    isHighlighted
+                      ? 'bg-blue-50/80 dark:bg-blue-950/50 border-l-2 border-blue-500 text-transparent'
+                      : 'text-transparent'
+                  }`}
+                >
+                  &nbsp;
+                </div>
+              );
+            })}
+          </div>
+
           <textarea
             ref={textareaRef}
             value={code}
-            onChange={(e) => onChangeCode(e.target.value)}
-            onSelect={handleCursorSync}
+            onChange={(e) => {
+              isInternalEditorChangeRef.current = true;
+              onChangeCode(e.target.value);
+            }}
             onClick={handleCursorSync}
             onKeyUp={handleCursorSync}
             onKeyDown={(e) => {
+              isInternalEditorChangeRef.current = true;
               if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
                 e.preventDefault();
                 if (e.shiftKey) {
@@ -267,7 +289,7 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
             spellCheck={false}
             placeholder={t.editor.placeholder}
             style={{ lineHeight: '20px' }}
-            className="w-full h-full p-2.5 bg-transparent text-slate-900 dark:text-slate-100 placeholder-slate-400 font-mono text-xs resize-none focus:outline-none leading-[20px] selection:bg-blue-500/30 overflow-auto whitespace-pre"
+            className="w-full h-full p-2.5 bg-transparent text-slate-900 dark:text-slate-100 placeholder-slate-400 font-mono text-xs resize-none focus:outline-none leading-[20px] overflow-auto whitespace-pre relative z-10"
           />
         </div>
       </div>

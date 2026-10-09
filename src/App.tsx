@@ -280,15 +280,29 @@ export const App: React.FC = () => {
     newLabel?: string,
     newLabelName?: string
   ) => {
-    const lines = code.split('\n');
-    const targetIndex = targetObj.lineNumber - 1;
-    if (targetIndex < 0 || targetIndex >= lines.length) return;
+    const latestObjs = parseObjectsFromSource(code);
+    let latestObj = latestObjs.find(o => o.id === targetObj.id);
+    if (!latestObj && targetObj.labelName) {
+      latestObj = latestObjs.find(o => o.labelName === targetObj.labelName);
+    }
+    if (!latestObj) {
+      const prevIdx = objects.findIndex(o => o.id === targetObj.id);
+      if (prevIdx >= 0 && prevIdx < latestObjs.length && latestObjs[prevIdx].type === targetObj.type) {
+        latestObj = latestObjs[prevIdx];
+      }
+    }
+    if (!latestObj) {
+      latestObj = latestObjs.find(o => o.lineNumber === targetObj.lineNumber && o.type === targetObj.type);
+    }
+    if (!latestObj) {
+      latestObj = targetObj;
+    }
 
-    const currentPending = pendingProperties[targetObj.id] || {};
-    const mergedProps = { ...targetObj.properties, ...currentPending, ...newProps };
-    const label = newLabel !== undefined ? newLabel : (targetObj.label || '');
+    const currentPending = pendingProperties[latestObj.id] || pendingProperties[targetObj.id] || {};
+    const mergedProps = { ...latestObj.properties, ...currentPending, ...newProps };
+    const label = newLabel !== undefined ? newLabel : (latestObj.label || targetObj.label || '');
 
-    const type = targetObj.type;
+    const type = latestObj.type || targetObj.type;
     const withVal = (mergedProps.with !== undefined ? mergedProps.with : mergedProps.withAnchor)?.trim();
     const atVal = mergedProps.at?.trim();
     const fromVal = mergedProps.from?.trim();
@@ -322,7 +336,7 @@ export const App: React.FC = () => {
     let updatedStatement = '';
 
     // ID 식별자(라벨명) 처리
-    let activeLabelName = newLabelName !== undefined ? newLabelName.trim() : (targetObj.labelName || '');
+    let activeLabelName = newLabelName !== undefined ? newLabelName.trim() : (latestObj.labelName || targetObj.labelName || '');
     if (activeLabelName) {
       // 대문자로 시작하도록 포맷 또는 유지
       updatedStatement += `${activeLabelName}: `;
@@ -594,11 +608,11 @@ export const App: React.FC = () => {
 
     const formatMultiLineStatement = (rawStmt: string, singleLine: string): string => {
       if (!rawStmt || !rawStmt.includes('\n')) {
-        return indent + singleLine;
+        return singleLine;
       }
 
       const rawLines = rawStmt.split('\n');
-      if (rawLines.length <= 1) return indent + singleLine;
+      if (rawLines.length <= 1) return singleLine;
 
       const prefixLines: string[] = [];
       let remainingSingle = singleLine.trim();
@@ -619,8 +633,8 @@ export const App: React.FC = () => {
         const content = rawL.trim().replace(/^[A-Z][a-zA-Z0-9_]*\s*:\s*/, '').replace(/\\$/, '').trim();
 
         if (remainingSingle.startsWith(content)) {
-          if (i === 0 && activeLabel) {
-            prefixLines.push(lIndent + activeLabel + content + ' \\');
+          if (i === 0) {
+            prefixLines.push((activeLabel ? activeLabel : '') + content + ' \\');
           } else {
             prefixLines.push(lIndent + content + ' \\');
           }
@@ -633,11 +647,11 @@ export const App: React.FC = () => {
       if (prefixLines.length > 0 && prefixLines.length === rawLines.length - 1) {
         const lastRaw = rawLines[rawLines.length - 1];
         const lastIndentMatch = lastRaw.match(/^(\s*)/);
-        const lastIndent = lastIndentMatch ? lastIndentMatch[1] : (indent + '   ');
+        const lastIndent = lastIndentMatch ? lastIndentMatch[1] : '    ';
         return [...prefixLines, lastIndent + remainingSingle].join('\n');
       }
 
-      return indent + singleLine;
+      return singleLine;
     };
 
     const isConnectorType = ['arrow', 'line', 'spline', 'move'].includes(type);
@@ -647,16 +661,11 @@ export const App: React.FC = () => {
     } else if (newProps.path !== undefined) {
       const parsedPath = parsePathIntoSegments(newProps.path);
       if (parsedPath.segments.length > 0) activeSegments = parsedPath.segments;
-    } else if (targetObj.properties.pathSegments && targetObj.properties.pathSegments.length > 0) {
-      activeSegments = targetObj.properties.pathSegments;
+    } else if (latestObj.properties.pathSegments && latestObj.properties.pathSegments.length > 0) {
+      activeSegments = latestObj.properties.pathSegments;
     }
 
-    const originalLine = lines[targetIndex];
-    const indentMatch = originalLine.match(/^(\s*)/);
-    const indent = indentMatch ? indentMatch[1] : '';
-    const lineSpan = targetObj.rawStatement ? targetObj.rawStatement.split('\n').length : 1;
-
-    let finalStatement = indent + updatedStatement;
+    let finalStatement = updatedStatement;
 
     // 다구간 선분(Multi-segment connector)인 경우 각 then 세그먼트를 '\' 개행으로 포맷
     if (isConnectorType && activeSegments && activeSegments.length > 1) {
@@ -683,8 +692,8 @@ export const App: React.FC = () => {
       if (mergedProps.dash) suffix += ` ${mergedProps.dash}`;
       if (mergedProps.chop) suffix += ` chop`;
 
-      const rawLines = targetObj.rawStatement ? targetObj.rawStatement.split('\n') : [];
-      let subIndent = indent + '    ';
+      const rawLines = latestObj.rawStatement ? latestObj.rawStatement.split('\n') : [];
+      let subIndent = '    ';
       if (rawLines.length > 1) {
         const matchSub = rawLines[1].match(/^(\s*)/);
         if (matchSub && matchSub[1]) {
@@ -717,7 +726,7 @@ export const App: React.FC = () => {
         const segStr = segStrings[i];
         if (i === 0) {
           const lineContent = `${activeLabelName ? activeLabelName + ': ' : ''}${header} ${segStr}`.trim();
-          multiLines.push(indent + lineContent + ' \\');
+          multiLines.push(lineContent + ' \\');
         } else if (i === segStrings.length - 1) {
           const lineContent = `then ${segStr}${suffix ? ' ' + suffix.trim() : ''}`.trim();
           multiLines.push(subIndent + lineContent);
@@ -727,93 +736,96 @@ export const App: React.FC = () => {
         }
       }
       finalStatement = multiLines.join('\n');
-    } else if (lineSpan > 1 && targetObj.rawStatement) {
-      finalStatement = formatMultiLineStatement(targetObj.rawStatement, updatedStatement);
+    } else if (latestObj.rawStatement && latestObj.rawStatement.includes('\n')) {
+      finalStatement = formatMultiLineStatement(latestObj.rawStatement, updatedStatement);
     }
 
-    const stmts = splitStatements(originalLine);
-    if (stmts.length > 1 && lineSpan === 1) {
-      let matchIdx = -1;
-      const objsOnLine = objects.filter(o => o.lineNumber === targetObj.lineNumber);
-      const idxOnLine = objsOnLine.findIndex(o => o.id === targetObj.id);
-      if (idxOnLine >= 0 && idxOnLine < stmts.length) {
-        matchIdx = idxOnLine;
-      }
-      if (matchIdx === -1 && targetObj.labelName) {
-        matchIdx = stmts.findIndex(s => s.trim().startsWith(`${targetObj.labelName}:`));
-      }
-      if (matchIdx === -1 && targetObj.rawStatement) {
-        matchIdx = stmts.findIndex(s => s.trim() === targetObj.rawStatement.trim());
-      }
-      if (matchIdx !== -1) {
-        stmts[matchIdx] = updatedStatement;
-        lines[targetIndex] = indent + stmts.map(s => s.trim()).join(';  ');
-      } else {
-        lines.splice(targetIndex, lineSpan, ...finalStatement.split('\n'));
-      }
+    let newCode: string;
+    if (latestObj.startChar !== undefined && latestObj.endChar !== undefined) {
+      newCode = code.substring(0, latestObj.startChar) + finalStatement + code.substring(latestObj.endChar);
     } else {
-      lines.splice(targetIndex, lineSpan, ...finalStatement.split('\n'));
+      const lines = code.split('\n');
+      const targetIndex = latestObj.lineNumber - 1;
+      const originalLine = lines[targetIndex] || '';
+      const indentMatch = originalLine.match(/^(\s*)/);
+      const indent = indentMatch ? indentMatch[1] : '';
+      const lineSpan = latestObj.rawStatement ? latestObj.rawStatement.split('\n').length : 1;
+      lines.splice(targetIndex, lineSpan, ...finalStatement.split('\n').map((l, i) => i === 0 ? indent + l : l));
+      newCode = lines.join('\n');
     }
 
     if (newLabelName !== undefined) {
       setSelectedObjectId(targetObj.id);
     }
 
-    const newCode = lines.join('\n');
     setCode(newCode);
     pushHistoryEntry(newCode);
   };
 
   const handleDeleteObject = (lineNumber: number, objId?: string) => {
-    const lines = code.split('\n');
-    const targetIndex = lineNumber - 1;
-    if (targetIndex < 0 || targetIndex >= lines.length) return;
+    const latestObjs = parseObjectsFromSource(code);
+    let targetObj = latestObjs.find(o => objId ? o.id === objId : o.lineNumber === lineNumber);
+    if (!targetObj && objId) {
+      const prevIdx = objects.findIndex(o => o.id === objId);
+      if (prevIdx >= 0 && prevIdx < latestObjs.length) {
+        targetObj = latestObjs[prevIdx];
+      }
+    }
+    if (!targetObj) {
+      targetObj = objects.find(o => objId ? o.id === objId : o.lineNumber === lineNumber);
+    }
 
-    const targetObj = objects.find(o => objId ? o.id === objId : o.lineNumber === lineNumber);
-    const lineSpan = targetObj?.rawStatement ? targetObj.rawStatement.split('\n').length : 1;
-    const originalLine = lines[targetIndex];
-    const indentMatch = originalLine.match(/^(\s*)/);
-    const indent = indentMatch ? indentMatch[1] : '';
-    const stmts = splitStatements(originalLine);
+    if (!targetObj) return;
 
-    if (stmts.length > 1 && objId && lineSpan === 1) {
-      let matchIdx = -1;
-      const objsOnLine = objects.filter(o => o.lineNumber === lineNumber);
-      const idxOnLine = objsOnLine.findIndex(o => o.id === objId);
-      if (idxOnLine >= 0 && idxOnLine < stmts.length) {
-        matchIdx = idxOnLine;
+    let newCode: string;
+    if (targetObj.startChar !== undefined && targetObj.endChar !== undefined) {
+      let delStart = targetObj.startChar;
+      let delEnd = targetObj.endChar;
+
+      // 세미콜론(;) 구분 라인인 경우 뒤쪽 세미콜론 및 공백 함께 제거
+      let nextIdx = delEnd;
+      while (nextIdx < code.length && (code[nextIdx] === ' ' || code[nextIdx] === '\t')) {
+        nextIdx++;
       }
-      if (matchIdx === -1 && targetObj?.labelName) {
-        matchIdx = stmts.findIndex(s => s.trim().startsWith(`${targetObj.labelName}:`));
-      }
-      if (matchIdx === -1 && targetObj?.rawStatement) {
-        matchIdx = stmts.findIndex(s => s.trim() === targetObj.rawStatement.trim());
-      }
-      if (matchIdx !== -1) {
-        stmts.splice(matchIdx, 1);
-        lines[targetIndex] = indent + stmts.map(s => s.trim()).join(';  ');
-        const newCode = lines.join('\n');
-        setCode(newCode);
-        pushHistoryEntry(newCode);
-        if (selectedObjectId === objId) {
-          setSelectedObjectId(null);
-          setSelectedLine(null);
-          setActiveTargetField(null);
-          setRefInsertion(null);
+      if (nextIdx < code.length && code[nextIdx] === ';') {
+        delEnd = nextIdx + 1;
+        while (delEnd < code.length && (code[delEnd] === ' ' || code[delEnd] === '\t')) {
+          delEnd++;
         }
-        return;
+      } else {
+        // 뒤쪽에 세미콜론이 없으면 앞쪽 세미콜론 탐색
+        let prevIdx = delStart - 1;
+        while (prevIdx >= 0 && (code[prevIdx] === ' ' || code[prevIdx] === '\t')) {
+          prevIdx--;
+        }
+        if (prevIdx >= 0 && code[prevIdx] === ';') {
+          delStart = prevIdx;
+        } else {
+          // 라인 전체를 차지하는 문장인 경우 앞쪽 들여쓰기 및 뒤쪽 개행문자 포함 제거
+          while (delStart > 0 && code[delStart - 1] !== '\n') {
+            delStart--;
+          }
+          if (delEnd < code.length && code[delEnd] === '\r') delEnd++;
+          if (delEnd < code.length && code[delEnd] === '\n') delEnd++;
+        }
       }
+
+      newCode = code.substring(0, delStart) + code.substring(delEnd);
     } else {
+      const lines = code.split('\n');
+      const targetIndex = targetObj.lineNumber - 1;
+      const lineSpan = targetObj.rawStatement ? targetObj.rawStatement.split('\n').length : 1;
       lines.splice(targetIndex, lineSpan);
-      const newCode = lines.join('\n');
-      setCode(newCode);
-      pushHistoryEntry(newCode);
-      if (selectedObjectId === objId || (targetObj && selectedObjectId === targetObj.id)) {
-        setSelectedObjectId(null);
-        setSelectedLine(null);
-        setActiveTargetField(null);
-        setRefInsertion(null);
-      }
+      newCode = lines.join('\n');
+    }
+
+    setCode(newCode);
+    pushHistoryEntry(newCode);
+    if (selectedObjectId === objId || (targetObj && selectedObjectId === targetObj.id)) {
+      setSelectedObjectId(null);
+      setSelectedLine(null);
+      setActiveTargetField(null);
+      setRefInsertion(null);
     }
   };
 

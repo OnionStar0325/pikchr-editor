@@ -99,6 +99,7 @@ const PositionInputRow: React.FC<PositionInputRowProps> = ({
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
+      prevValueRef.current = localVal;
       onCommit(localVal);
     } else if (e.key === 'Escape') {
       setLocalVal(value);
@@ -239,6 +240,7 @@ const CommitInput: React.FC<CommitInputProps> = ({
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
+      prevValueRef.current = localVal;
       onCommit(localVal);
     } else if (e.key === 'Escape') {
       setLocalVal(initialValue);
@@ -251,6 +253,7 @@ const CommitInput: React.FC<CommitInputProps> = ({
 
   const handleBlur = () => {
     if (isMountedRef.current && localVal.trim() !== (prevValueRef.current || '').trim()) {
+      prevValueRef.current = localVal;
       onCommit(localVal);
     }
   };
