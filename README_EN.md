@@ -2,12 +2,12 @@
 
 [English](README_EN.md) | [한국어](README.md)
 
-A visual web editor designed for interactively previewing, creating, and modifying the Pikchr markup language.
+A visual web editor designed for interactively previewing, creating, and modifying the [Pikchr](https://pikchr.org) markup language.
 This project was generated and developed using Google Antigravity.
 
 ## 1. Overview & Purpose
 
-When authoring Pikchr (a PIC-derived markup language for diagrams) scripts, this tool provides synchronized live rendering, direct code editing, and a visual property inspector to rapidly design and customize diagrams.
+When authoring [Pikchr](https://pikchr.org) (a PIC-derived markup language for diagrams) scripts, this tool provides synchronized live rendering, direct code editing, and a visual property inspector to rapidly design and customize diagrams.
 
 ## 2. Operating Environment (OS Compatibility)
 
@@ -39,12 +39,12 @@ When authoring Pikchr (a PIC-derived markup language for diagrams) scripts, this
 
 1. **Top Menu Bar**
    - File operations (New, Copy Source Code, Export SVG/PNG)
-   - Edit (Undo, Redo, Clear Canvas), Template Examples, Language Selector (KO/EN/JA), Theme Toggle (Dark/Light)
+   - Edit (Undo, Redo, Clear Canvas), Template Examples ([Official Examples Source](https://pikchr.org/home/doc/trunk/doc/examples.md)), Language Selector (KO/EN/JA), Theme Toggle (Dark/Light)
 2. **Left Palette Sidebar**
    - One-click insertion for basic objects (box, circle, cylinder, diamond, ellipse, file, etc.) and snippets
    - List of defined variables and macros (`define`)
 3. **Center Stage (Interactive Canvas)**
-   - Real-time SVG rendering from Pikchr script
+   - Real-time SVG rendering from [Pikchr](https://pikchr.org) script
    - Pan (drag) and Zoom (mouse wheel) navigation
    - Element selection with automatic focus synchronization in code editor and inspector
    - Interactive anchor point picker for connector target positioning
@@ -62,7 +62,7 @@ When authoring Pikchr (a PIC-derived markup language for diagrams) scripts, this
 3. **Configure Connectors & Paths**:
    - Select an arrow/line object and click `+ Add Segment (then)` to configure sequential steps (Direction, Length, To, Until).
    - Enable Target Mode to pick anchor points directly on the canvas.
-4. **Direct Code Editing**: Write or tweak Pikchr markup directly in the bottom `code view` with immediate canvas and inspector synchronization.
+4. **Direct Code Editing**: Write or tweak [Pikchr](https://pikchr.org) markup directly in the bottom `code view` with immediate canvas and inspector synchronization.
 5. **Export & Copy**: Use `File` -> `Export SVG` or `Export PNG` to download graphics, or use `Copy Source Code` to copy the entire code to the clipboard.
 
 ## 5. Installation & Execution
@@ -88,6 +88,7 @@ npm run build
 ```
 Build artifacts will be output to the `dist/` directory.
 
-## 6. License
+## 6. License & References
 
-This project is licensed under the [MIT License](LICENSE).
+- **License**: This project is licensed under the [MIT License](LICENSE).
+- **Examples Reference**: The built-in diagram templates and examples are sourced from the [Pikchr Official Examples Documentation](https://pikchr.org/home/doc/trunk/doc/examples.md).
