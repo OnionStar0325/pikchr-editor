@@ -163,4 +163,30 @@ describe('Responsive and Resizable UI Components', () => {
     );
     expect(htmlMobileFull).toContain('flex-1 h-full w-full');
   });
+
+  it('renders autocomplete toggle checkbox in CodeEditorPanel header', () => {
+    const html = renderToString(
+      React.createElement(I18nProvider, null,
+        React.createElement(CodeEditorPanel, {
+          code: 'box "Hello"',
+          onChangeCode: () => {},
+          selectedLine: null,
+          selectedObjectId: null,
+          objects: [],
+          definitions: [],
+          onSelectLine: () => {},
+          compileResult: { success: true, svgHtml: '', error: null, durationMs: 1 },
+          isExpanded: false,
+          onToggleExpand: () => {},
+          onCommitHistory: () => {},
+          onUndo: () => {},
+          onRedo: () => {},
+        })
+      )
+    );
+    // Check that checkbox input is rendered
+    expect(html).toContain('type="checkbox"');
+    // Check that Korean i18n label for autocomplete is rendered
+    expect(html).toContain('자동완성 컨텍스트 표시');
+  });
 });

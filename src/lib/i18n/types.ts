@@ -194,6 +194,7 @@ export interface TranslationDictionary {
     syntaxErrorPrefix: string;
     jumpToError: string;
     toggleExpand: string;
+    showAutocomplete: string;
   };
   help: {
     modalTitle: string;

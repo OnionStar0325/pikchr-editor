@@ -194,6 +194,7 @@ export const ko: TranslationDictionary = {
     syntaxErrorPrefix: '오류:',
     jumpToError: '오류 줄로 이동',
     toggleExpand: '패널 크기 토글',
+    showAutocomplete: '자동완성 컨텍스트 표시',
   },
   help: {
     modalTitle: 'Pikchr 문법 & 가이드',

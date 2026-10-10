@@ -436,6 +436,7 @@ export const App: React.FC = () => {
     // 1. Text Object
     if (type === 'text') {
       updatedStatement += `text`;
+      if (mergedProps.extraModifiers) updatedStatement += ` ${mergedProps.extraModifiers}`;
       if (atVal) {
         if (withVal) updatedStatement += withVal.startsWith('with ') ? ` ${withVal}` : ` with ${withVal}`;
         updatedStatement += atVal.startsWith('at ') ? ` ${atVal}` : ` at ${atVal}`;
@@ -452,6 +453,7 @@ export const App: React.FC = () => {
     // 2. Arrow / Line / Spline Objects
     else if (['arrow', 'line', 'spline'].includes(type)) {
       updatedStatement += `${type}`;
+      if (mergedProps.extraModifiers) updatedStatement += ` ${mergedProps.extraModifiers}`;
       if (mergedProps.arrowHead && mergedProps.arrowHead !== 'none' && type !== 'arrow') {
         updatedStatement += ` ${mergedProps.arrowHead}`;
       } else if (type === 'arrow' && mergedProps.arrowHead && mergedProps.arrowHead !== '->' && mergedProps.arrowHead !== 'none') {
@@ -538,6 +540,7 @@ export const App: React.FC = () => {
     // 3. Arc Object
     else if (type === 'arc') {
       updatedStatement += `arc`;
+      if (mergedProps.extraModifiers) updatedStatement += ` ${mergedProps.extraModifiers}`;
       if (mergedProps.arrowHead && mergedProps.arrowHead !== 'none') updatedStatement += ` ${mergedProps.arrowHead}`;
       if (mergedProps.arcDir) updatedStatement += ` ${mergedProps.arcDir}`;
 
@@ -630,6 +633,7 @@ export const App: React.FC = () => {
           mergedProps.to = undefined;
         }
         updatedStatement += `move`;
+        if (mergedProps.extraModifiers) updatedStatement += ` ${mergedProps.extraModifiers}`;
         if (mergedProps.direction) updatedStatement += ` ${mergedProps.direction}`;
         if (!toVal && !untilVal && mergedProps.length) {
           updatedStatement += ` ${mergedProps.length}`;
@@ -645,6 +649,7 @@ export const App: React.FC = () => {
     // 5. Circle / Dot Objects
     else if (['circle', 'dot'].includes(type)) {
       updatedStatement += `${type}`;
+      if (mergedProps.extraModifiers) updatedStatement += ` ${mergedProps.extraModifiers}`;
       if (atVal) {
         if (withVal) updatedStatement += withVal.startsWith('with ') ? ` ${withVal}` : ` with ${withVal}`;
         updatedStatement += atVal.startsWith('at ') ? ` ${atVal}` : ` at ${atVal}`;
@@ -671,6 +676,7 @@ export const App: React.FC = () => {
     // 6. Box-like Shapes (Box, Cylinder, Diamond, Oval, Ellipse, File, Block)
     else {
       updatedStatement += `${type}`;
+      if (mergedProps.extraModifiers) updatedStatement += ` ${mergedProps.extraModifiers}`;
       if (atVal) {
         if (withVal) updatedStatement += withVal.startsWith('with ') ? ` ${withVal}` : ` with ${withVal}`;
         updatedStatement += atVal.startsWith('at ') ? ` ${atVal}` : ` at ${atVal}`;
@@ -761,6 +767,9 @@ export const App: React.FC = () => {
     // 다구간 선분(Multi-segment connector)인 경우 각 then 세그먼트를 '\' 개행으로 포맷
     if (isConnectorType && activeSegments && activeSegments.length > 1) {
       let header = `${type}`;
+      if (mergedProps.extraModifiers) {
+        header += ` ${mergedProps.extraModifiers}`;
+      }
       if (type !== 'move' && mergedProps.arrowHead && mergedProps.arrowHead !== 'none') {
         header += ` ${mergedProps.arrowHead}`;
       }

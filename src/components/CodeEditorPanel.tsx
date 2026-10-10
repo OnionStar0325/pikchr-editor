@@ -67,6 +67,19 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
     position: { top: 0, left: 0, lineHeight: 20 },
   });
 
+  // 자동완성 컨텍스트 표시 여부 설정 (로컬 스토리지 유지)
+  const [isAutocompleteEnabled, setIsAutocompleteEnabled] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('pikchr_enable_autocomplete');
+      return saved !== null ? saved === 'true' : true;
+    }
+    return true;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('pikchr_enable_autocomplete', String(isAutocompleteEnabled));
+  }, [isAutocompleteEnabled]);
+
   // 현재 선택된 객체 및 하이라이트할 라인 범위 계산
   const currentSelectedObj = selectedObjectId
     ? (objects.find(o => o.id === selectedObjectId) || definitions.find(d => d.id === selectedObjectId))
@@ -164,7 +177,12 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
 
   // 자동완성 문맥 분석 및 팝오버 갱신
   const updateAutocomplete = (text: string, cursorPos: number) => {
-    if (!textareaRef.current) return;
+    if (!textareaRef.current || !isAutocompleteEnabled) {
+      if (autocomplete.isOpen) {
+        setAutocomplete(prev => ({ ...prev, isOpen: false }));
+      }
+      return;
+    }
 
     const ctx = analyzeAutocompleteContext(text, cursorPos);
     if (!ctx) {
@@ -295,16 +313,35 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
           )}
         </div>
 
-        {/* Height toggle button (hidden on mobile full view) */}
-        {!isMobileFull && (
-          <button
-            onClick={onToggleExpand}
-            className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition shrink-0"
-            title={t.editor.toggleExpand}
-          >
-            {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-          </button>
-        )}
+        {/* Controls (Autocomplete toggle & expand button) */}
+        <div className="flex items-center space-x-3 shrink-0">
+          <label className="flex items-center space-x-1.5 text-[11px] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 cursor-pointer select-none transition">
+            <input
+              type="checkbox"
+              checked={isAutocompleteEnabled}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setIsAutocompleteEnabled(checked);
+                if (!checked) {
+                  setAutocomplete(prev => ({ ...prev, isOpen: false }));
+                }
+              }}
+              className="w-3.5 h-3.5 rounded bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-blue-600 focus:ring-0 cursor-pointer"
+            />
+            <span>{t.editor.showAutocomplete}</span>
+          </label>
+
+          {/* Height toggle button (hidden on mobile full view) */}
+          {!isMobileFull && (
+            <button
+              onClick={onToggleExpand}
+              className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition shrink-0"
+              title={t.editor.toggleExpand}
+            >
+              {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Editor Body with Line Numbers */}
@@ -440,6 +477,7 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
 
               // 수동 호출 단축키: Ctrl+Space 또는 Cmd+Space
               if ((e.ctrlKey || e.metaKey) && e.code === 'Space') {
+                if (!isAutocompleteEnabled) return;
                 e.preventDefault();
                 const cursor = e.currentTarget.selectionStart;
                 const ctx = analyzeAutocompleteContext(code, cursor);

@@ -83,4 +83,28 @@ describe('Statement Highlight and Inline Statements (box; box; box;)', () => {
     expect(htmlSecondSelected).toContain('ring-blue-500/60');
     expect(htmlSecondSelected).toContain('bg-blue-500/25');
   });
+
+  it('preserves unmanaged modifiers such as "same" and "behind" in extraModifiers', () => {
+    const code = 'box same "Parser"\nbox same behind Box1 "Analyzer"';
+    const objs = parseObjectsFromSource(code);
+    expect(objs).toHaveLength(2);
+
+    expect(objs[0].label).toBe('Parser');
+    expect(objs[0].properties.extraModifiers).toBe('same');
+
+    expect(objs[1].label).toBe('Analyzer');
+    expect(objs[1].properties.extraModifiers).toBe('same behind Box1');
+  });
+
+  it('preserves shape keyword in relative references such as "same as 1st box"', () => {
+    const code = 'UT: box same as 1st box at (Tokenizer,Pager) "Utilities"';
+    const objs = parseObjectsFromSource(code);
+    expect(objs).toHaveLength(1);
+
+    expect(objs[0].labelName).toBe('UT');
+    expect(objs[0].label).toBe('Utilities');
+    expect(objs[0].properties.at).toBe('(Tokenizer,Pager)');
+    expect(objs[0].properties.extraModifiers).toBe('same as 1st box');
+  });
 });
+

@@ -62,6 +62,7 @@ export interface PikchrObjectProperties {
   withAnchor?: string;
   location?: string;
   distance?: string;
+  extraModifiers?: string;
 }
 
 export type ActiveTargetField = 'at' | 'with' | 'from' | 'to' | 'until' | string | null;
