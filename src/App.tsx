@@ -1041,7 +1041,7 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden transition-colors">
+    <div className="h-screen h-dvh max-h-dvh w-screen flex flex-col bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden transition-colors">
       {/* 1. Desktop IDE Menu Bar with i18n */}
       <MenuBar
         onNewDiagram={handleNewDiagram}

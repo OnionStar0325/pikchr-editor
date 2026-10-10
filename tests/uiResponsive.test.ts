@@ -162,6 +162,8 @@ describe('Responsive and Resizable UI Components', () => {
       )
     );
     expect(htmlMobileFull).toContain('flex-1 h-full w-full');
+    expect(htmlMobileFull).toContain('min-h-0');
+    expect(htmlMobileFull).toContain('padding-bottom:220px');
   });
 
   it('renders autocomplete toggle checkbox in CodeEditorPanel header', () => {
