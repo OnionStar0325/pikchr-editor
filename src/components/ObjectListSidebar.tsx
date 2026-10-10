@@ -43,6 +43,7 @@ interface ObjectListSidebarProps {
     newLabelName?: string
   ) => void;
   onDeleteObject: (lineNumber: number, objId?: string) => void;
+  width?: number;
 }
 
 const ANCHOR_CHIPS = ['.c', '.n', '.ne', '.e', '.se', '.s', '.sw', '.w', '.nw'];
@@ -657,6 +658,7 @@ export const ObjectListSidebar: React.FC<ObjectListSidebarProps> = ({
   onSelectObject,
   onUpdateObject,
   onDeleteObject,
+  width,
 }) => {
   const { t } = useTranslation();
   const selectedObject = selectedObjectId
@@ -732,7 +734,10 @@ export const ObjectListSidebar: React.FC<ObjectListSidebarProps> = ({
   const isBoxLike = ['box', 'diamond', 'oval', 'ellipse', 'file', 'block'].includes(selectedObject?.type || '');
 
   return (
-    <aside className="w-84 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 flex flex-col shrink-0 select-none overflow-hidden text-slate-700 dark:text-slate-200 transition-colors">
+    <aside
+      style={width ? { width: `${width}px` } : undefined}
+      className={`${width ? '' : 'w-84'} bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 flex flex-col shrink-0 select-none overflow-hidden text-slate-700 dark:text-slate-200 transition-colors`}
+    >
       {/* 1. Object List Header */}
       <div className="p-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-950/60">
         <div className="flex items-center space-x-2">

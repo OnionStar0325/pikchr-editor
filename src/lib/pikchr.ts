@@ -1,4 +1,5 @@
 import { CompileResult, CompileError, PikchrObject, PikchrDefinition, PikchrShapeType, PathSegment } from './types';
+export { isContinuationLine, containsStatementTerminator, isStatementCompleted } from './statementDetector';
 
 // Pikchr WASM / JS 컴파일러 인스턴스
 let pikchrInstance: ((source: string, classname?: string, flags?: number) => string) | null = null;
@@ -720,6 +721,28 @@ export function parseObjectsFromSource(source: string): PikchrObject[] {
     if (/\bbold\b/i.test(modifiersText)) properties.textStyle = 'bold';
     else if (/\bitalic\b/i.test(modifiersText)) properties.textStyle = 'italic';
     else if (/\b(?:mono|monospace)\b/i.test(modifiersText)) properties.textStyle = 'mono';
+
+    // 속성 창에서 직접 관리하지 않는 비표준/추가 키워드(예: same, same as 1st box, behind B1 등) 보존 추출
+    let unmanagedText = modifiersText;
+    // 시작 부분의 라벨 식별자(예: "UT:") 제거
+    unmanagedText = unmanagedText.replace(/^\s*(?:[A-Z][a-zA-Z0-9_]*\s*:\s*)?/i, ' ');
+    // 시작 부분의 객체 타입 키워드(예: "box")만 1회 제거 (주의: "same as 1st box" 등 상대 참조 내부의 box가 제거되지 않도록 ^\s* 적용)
+    unmanagedText = unmanagedText.replace(new RegExp('^\\s*\\b' + matchedType + '\\b', 'i'), ' ');
+    unmanagedText = unmanagedText.replace(/\b(?:thick|thin|solid|dashed|dotted|fit|chop|cw|ccw)\b/gi, ' ');
+    unmanagedText = unmanagedText.replace(/\b(?:invis|invisible)\b/gi, ' ');
+    unmanagedText = unmanagedText.replace(/(<->|<-|->)/g, ' ');
+    unmanagedText = unmanagedText.replace(/\b(?:above|below|aligned|center|ljust|rjust|big|small|bold|italic|mono|monospace)\b/gi, ' ');
+    if (['arrow', 'line', 'spline', 'arc', 'move'].includes(matchedType)) {
+      unmanagedText = unmanagedText.replace(/\b(?:then|go)\b/gi, ' ');
+      unmanagedText = unmanagedText.replace(/\b(?:right|left|up|down)\b/gi, ' ');
+    } else if (matchedType === 'direction') {
+      unmanagedText = unmanagedText.replace(/\b(?:right|left|up|down)\b/gi, ' ');
+    }
+
+    const trimmedUnmanaged = unmanagedText.trim().replace(/\s+/g, ' ');
+    if (trimmedUnmanaged) {
+      properties.extraModifiers = trimmedUnmanaged;
+    }
 
     // 선형/이동 객체의 다구간 패스(Multi-segment Path) 파싱 및 to/until 상호배타 보정
     if (['arrow', 'line', 'spline', 'arc', 'move'].includes(matchedType)) {

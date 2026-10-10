@@ -13,6 +13,10 @@ export const en: TranslationDictionary = {
     add: 'Add',
     wasmTime: 'WASM',
     error: 'Syntax Error',
+    codeView: 'Code View',
+    renderView: 'Render Result',
+    switchToCode: 'View Code',
+    switchToRender: 'View Diagram',
   },
   menu: {
     brand: 'Pikchr Editor',
@@ -190,6 +194,7 @@ export const en: TranslationDictionary = {
     syntaxErrorPrefix: 'Error:',
     jumpToError: 'Jump to Error Line',
     toggleExpand: 'Toggle Panel Size',
+    showAutocomplete: 'Show Autocomplete',
   },
   help: {
     modalTitle: 'Pikchr Syntax & Guide',

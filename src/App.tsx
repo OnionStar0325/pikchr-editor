@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Check } from 'lucide-react';
+import { Check, FileCode2, Eye } from 'lucide-react';
 import { useTranslation } from './lib/i18n';
 import { useTheme } from './lib/theme';
 import { MenuBar } from './components/MenuBar';
@@ -14,7 +14,7 @@ import { EXAMPLES } from './lib/examples';
 
 const DEFAULT_CODE = EXAMPLES[0].code;
 
-export const copyToClipboard = async (text: string): Promise<boolean> => {
+const copyToClipboard = async (text: string): Promise<boolean> => {
   if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
     try {
       await navigator.clipboard.writeText(text);
@@ -64,9 +64,101 @@ export const App: React.FC = () => {
   const [isEditorExpanded, setIsEditorExpanded] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
 
+  // --- Resizable Panels & Splitters ---
+  const [leftWidth, setLeftWidth] = useState<number>(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('pikchr_w_left') : null;
+    return saved ? Math.max(180, Math.min(600, parseInt(saved, 10))) : 280;
+  });
+  const [rightWidth, setRightWidth] = useState<number>(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('pikchr_w_right') : null;
+    return saved ? Math.max(220, Math.min(650, parseInt(saved, 10))) : 320;
+  });
+  const [bottomHeight, setBottomHeight] = useState<number>(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('pikchr_h_bottom') : null;
+    return saved ? Math.max(120, Math.min(700, parseInt(saved, 10))) : 210;
+  });
+
+  const [isDraggingLeft, setIsDraggingLeft] = useState(false);
+  const [isDraggingRight, setIsDraggingRight] = useState(false);
+  const [isDraggingBottom, setIsDraggingBottom] = useState(false);
+
+  // --- Mobile Responsive UI ---
+  const [isMobile, setIsMobile] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth < 768;
+    }
+    return false;
+  });
+  const [mobileTab, setMobileTab] = useState<'canvas' | 'editor'>('canvas');
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('pikchr_w_left', String(leftWidth));
+  }, [leftWidth]);
+
+  useEffect(() => {
+    localStorage.setItem('pikchr_w_right', String(rightWidth));
+  }, [rightWidth]);
+
+  useEffect(() => {
+    localStorage.setItem('pikchr_h_bottom', String(bottomHeight));
+  }, [bottomHeight]);
+
+  useEffect(() => {
+    if (!isDraggingLeft && !isDraggingRight && !isDraggingBottom) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isDraggingLeft) {
+        const newWidth = Math.max(180, Math.min(600, e.clientX));
+        setLeftWidth(newWidth);
+      } else if (isDraggingRight) {
+        const newWidth = Math.max(220, Math.min(650, window.innerWidth - e.clientX));
+        setRightWidth(newWidth);
+      } else if (isDraggingBottom) {
+        const maxHeight = Math.max(200, window.innerHeight - 140);
+        const newHeight = Math.max(100, Math.min(maxHeight, window.innerHeight - e.clientY));
+        setBottomHeight(newHeight);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingLeft(false);
+      setIsDraggingRight(false);
+      setIsDraggingBottom(false);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDraggingLeft, isDraggingRight, isDraggingBottom]);
+
   const [activeTargetField, setActiveTargetField] = useState<ActiveTargetField>(null);
   const [refInsertion, setRefInsertion] = useState<{ field: ActiveTargetField; value: string; timestamp: number } | null>(null);
   const [pendingProperties, setPendingProperties] = useState<Record<string, Partial<PikchrObjectProperties>>>({});
+
+  const isDarkMode = canvasBg === 'paper-dark' || (canvasBg === 'transparent' && theme === 'dark');
+
+  // 코드 또는 테마/캔버스 배경 변경 시 컴파일 및 파싱 수행
+  const runCompile = useCallback(async (currentCode: string, dark: boolean) => {
+    const result = await compilePikchr(currentCode, dark);
+    setCompileResult(result);
+    if (result.success) {
+      const parsedObjs = parseObjectsFromSource(currentCode);
+      const parsedDefs = parseDefinitionsFromSource(currentCode);
+      setObjects(parsedObjs);
+      setDefinitions(parsedDefs);
+    }
+  }, []);
 
   // --- Undo / Redo History Management ---
   const [history, setHistory] = useState<string[]>([DEFAULT_CODE]);
@@ -101,6 +193,7 @@ export const App: React.FC = () => {
       const targetCode = history[targetIdx];
       setHistoryIndex(targetIdx);
       setCode(targetCode);
+      runCompile(targetCode, isDarkMode);
       setActiveTargetField(null);
       setRefInsertion(null);
       setPendingProperties({});
@@ -108,7 +201,7 @@ export const App: React.FC = () => {
         isUndoRedoRef.current = false;
       }, 50);
     }
-  }, [history, historyIndex]);
+  }, [history, historyIndex, isDarkMode, runCompile]);
 
   const handleRedo = useCallback(() => {
     if (editorDebounceRef.current) {
@@ -121,6 +214,7 @@ export const App: React.FC = () => {
       const targetCode = history[targetIdx];
       setHistoryIndex(targetIdx);
       setCode(targetCode);
+      runCompile(targetCode, isDarkMode);
       setActiveTargetField(null);
       setRefInsertion(null);
       setPendingProperties({});
@@ -128,7 +222,7 @@ export const App: React.FC = () => {
         isUndoRedoRef.current = false;
       }, 50);
     }
-  }, [history, historyIndex]);
+  }, [history, historyIndex, isDarkMode, runCompile]);
 
   // Global Undo / Redo Keyboard Shortcuts (Ctrl+Z, Ctrl+Y, Cmd+Z, Cmd+Shift+Z)
   useEffect(() => {
@@ -163,23 +257,13 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleUndo, handleRedo]);
 
-  const isDarkMode = canvasBg === 'paper-dark' || (canvasBg === 'transparent' && theme === 'dark');
-
-  // 코드 또는 테마/캔버스 배경 변경 시 컴파일 및 파싱 수행
-  const runCompile = useCallback(async (currentCode: string, dark: boolean) => {
-    const result = await compilePikchr(currentCode, dark);
-    setCompileResult(result);
-    if (result.success) {
-      const parsedObjs = parseObjectsFromSource(currentCode);
-      const parsedDefs = parseDefinitionsFromSource(currentCode);
-      setObjects(parsedObjs);
-      setDefinitions(parsedDefs);
-    }
-  }, []);
+  // 테마/캔버스 배경 변경 시 또는 초기 마운트 시 컴파일 수행
+  const codeRef = useRef(code);
+  codeRef.current = code;
 
   useEffect(() => {
-    runCompile(code, isDarkMode);
-  }, [code, isDarkMode, runCompile]);
+    runCompile(codeRef.current, isDarkMode);
+  }, [isDarkMode, runCompile]);
 
   const augmentedObjects = useMemo(() => {
     return objects.map(obj => {
@@ -204,8 +288,11 @@ export const App: React.FC = () => {
     pushHistoryEntry(codeToCommit);
   }, [code, pushHistoryEntry]);
 
-  const handleCodeChange = (newCode: string) => {
+  const handleCodeChange = (newCode: string, isStatementComplete = false) => {
     setCode(newCode);
+    if (isStatementComplete) {
+      runCompile(newCode, isDarkMode);
+    }
     if (editorDebounceRef.current) clearTimeout(editorDebounceRef.current);
     editorDebounceRef.current = setTimeout(() => {
       pushHistoryEntry(newCode);
@@ -239,6 +326,7 @@ export const App: React.FC = () => {
         nextCode = trimmed ? `${trimmed}\n${snippet}\n` : `${snippet}\n`;
       }
       pushHistoryEntry(nextCode);
+      runCompile(nextCode, isDarkMode);
       return nextCode;
     });
   };
@@ -247,6 +335,7 @@ export const App: React.FC = () => {
     const newCode = `scale = 0.8\nbox "Start Node" fill 0xe0f2fe fit\narrow right 0.5in\nbox "End Node" fill 0xdcfce7 fit\n`;
     setCode(newCode);
     pushHistoryEntry(newCode);
+    runCompile(newCode, isDarkMode);
     setSelectedLine(null);
     setSelectedObjectId(null);
     setActiveTargetField(null);
@@ -257,6 +346,7 @@ export const App: React.FC = () => {
   const handleClearAll = () => {
     setCode('');
     pushHistoryEntry('');
+    runCompile('', isDarkMode);
     setSelectedLine(null);
     setSelectedObjectId(null);
     setActiveTargetField(null);
@@ -267,6 +357,7 @@ export const App: React.FC = () => {
   const handleLoadTemplate = (templateCode: string) => {
     setCode(templateCode);
     pushHistoryEntry(templateCode);
+    runCompile(templateCode, isDarkMode);
     setSelectedLine(null);
     setSelectedObjectId(null);
     setActiveTargetField(null);
@@ -345,6 +436,7 @@ export const App: React.FC = () => {
     // 1. Text Object
     if (type === 'text') {
       updatedStatement += `text`;
+      if (mergedProps.extraModifiers) updatedStatement += ` ${mergedProps.extraModifiers}`;
       if (atVal) {
         if (withVal) updatedStatement += withVal.startsWith('with ') ? ` ${withVal}` : ` with ${withVal}`;
         updatedStatement += atVal.startsWith('at ') ? ` ${atVal}` : ` at ${atVal}`;
@@ -361,6 +453,7 @@ export const App: React.FC = () => {
     // 2. Arrow / Line / Spline Objects
     else if (['arrow', 'line', 'spline'].includes(type)) {
       updatedStatement += `${type}`;
+      if (mergedProps.extraModifiers) updatedStatement += ` ${mergedProps.extraModifiers}`;
       if (mergedProps.arrowHead && mergedProps.arrowHead !== 'none' && type !== 'arrow') {
         updatedStatement += ` ${mergedProps.arrowHead}`;
       } else if (type === 'arrow' && mergedProps.arrowHead && mergedProps.arrowHead !== '->' && mergedProps.arrowHead !== 'none') {
@@ -447,6 +540,7 @@ export const App: React.FC = () => {
     // 3. Arc Object
     else if (type === 'arc') {
       updatedStatement += `arc`;
+      if (mergedProps.extraModifiers) updatedStatement += ` ${mergedProps.extraModifiers}`;
       if (mergedProps.arrowHead && mergedProps.arrowHead !== 'none') updatedStatement += ` ${mergedProps.arrowHead}`;
       if (mergedProps.arcDir) updatedStatement += ` ${mergedProps.arcDir}`;
 
@@ -539,6 +633,7 @@ export const App: React.FC = () => {
           mergedProps.to = undefined;
         }
         updatedStatement += `move`;
+        if (mergedProps.extraModifiers) updatedStatement += ` ${mergedProps.extraModifiers}`;
         if (mergedProps.direction) updatedStatement += ` ${mergedProps.direction}`;
         if (!toVal && !untilVal && mergedProps.length) {
           updatedStatement += ` ${mergedProps.length}`;
@@ -554,6 +649,7 @@ export const App: React.FC = () => {
     // 5. Circle / Dot Objects
     else if (['circle', 'dot'].includes(type)) {
       updatedStatement += `${type}`;
+      if (mergedProps.extraModifiers) updatedStatement += ` ${mergedProps.extraModifiers}`;
       if (atVal) {
         if (withVal) updatedStatement += withVal.startsWith('with ') ? ` ${withVal}` : ` with ${withVal}`;
         updatedStatement += atVal.startsWith('at ') ? ` ${atVal}` : ` at ${atVal}`;
@@ -580,6 +676,7 @@ export const App: React.FC = () => {
     // 6. Box-like Shapes (Box, Cylinder, Diamond, Oval, Ellipse, File, Block)
     else {
       updatedStatement += `${type}`;
+      if (mergedProps.extraModifiers) updatedStatement += ` ${mergedProps.extraModifiers}`;
       if (atVal) {
         if (withVal) updatedStatement += withVal.startsWith('with ') ? ` ${withVal}` : ` with ${withVal}`;
         updatedStatement += atVal.startsWith('at ') ? ` ${atVal}` : ` at ${atVal}`;
@@ -670,6 +767,9 @@ export const App: React.FC = () => {
     // 다구간 선분(Multi-segment connector)인 경우 각 then 세그먼트를 '\' 개행으로 포맷
     if (isConnectorType && activeSegments && activeSegments.length > 1) {
       let header = `${type}`;
+      if (mergedProps.extraModifiers) {
+        header += ` ${mergedProps.extraModifiers}`;
+      }
       if (type !== 'move' && mergedProps.arrowHead && mergedProps.arrowHead !== 'none') {
         header += ` ${mergedProps.arrowHead}`;
       }
@@ -760,6 +860,7 @@ export const App: React.FC = () => {
 
     setCode(newCode);
     pushHistoryEntry(newCode);
+    runCompile(newCode, isDarkMode);
   };
 
   const handleDeleteObject = (lineNumber: number, objId?: string) => {
@@ -821,6 +922,7 @@ export const App: React.FC = () => {
 
     setCode(newCode);
     pushHistoryEntry(newCode);
+    runCompile(newCode, isDarkMode);
     if (selectedObjectId === objId || (targetObj && selectedObjectId === targetObj.id)) {
       setSelectedObjectId(null);
       setSelectedLine(null);
@@ -960,58 +1062,195 @@ export const App: React.FC = () => {
         durationMs={compileResult.durationMs}
       />
 
-      {/* 2. Middle Main Workspace */}
-      <div className="flex-1 flex overflow-hidden min-h-0 relative">
-        {/* Left Palette & Definitions Sidebar */}
-        <PaletteSidebar
-          onInsertSnippet={handleInsertSnippet}
-          definitions={definitions}
-          onSelectLine={(line) => handleSelectObject(line)}
-          onDeleteLine={(line) => handleDeleteObject(line)}
-        />
+      {/* Mobile View Switcher Bar */}
+      {isMobile && (
+        <div className="h-10 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-3 flex items-center justify-between shrink-0 select-none z-20">
+          <div className="flex w-full p-1 bg-slate-100 dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 space-x-1">
+            <button
+              onClick={() => setMobileTab('editor')}
+              className={`flex-1 py-1 px-3 rounded-md text-xs font-semibold flex items-center justify-center space-x-1.5 transition ${
+                mobileTab === 'editor'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
+            >
+              <FileCode2 className="w-3.5 h-3.5" />
+              <span>{t.common.codeView}</span>
+            </button>
+            <button
+              onClick={() => setMobileTab('canvas')}
+              className={`flex-1 py-1 px-3 rounded-md text-xs font-semibold flex items-center justify-center space-x-1.5 transition ${
+                mobileTab === 'canvas'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>{t.common.renderView}</span>
+            </button>
+          </div>
+        </div>
+      )}
 
-        {/* Center Interactive Canvas */}
-        <CenterStage
-          compileResult={compileResult}
-          objects={augmentedObjects}
-          selectedLine={selectedLine}
-          selectedObjectId={selectedObjectId}
-          activeTargetField={activeTargetField}
-          onSelectLine={handleSelectObject}
-          onSelectAnchor={handleSelectAnchor}
-        />
+      {/* Main Workspace: Mobile View vs Desktop Multi-panel */}
+      {isMobile ? (
+        <div className="flex-1 flex overflow-hidden min-h-0 relative">
+          {mobileTab === 'canvas' ? (
+            <CenterStage
+              compileResult={compileResult}
+              objects={augmentedObjects}
+              selectedLine={selectedLine}
+              selectedObjectId={selectedObjectId}
+              activeTargetField={activeTargetField}
+              onSelectLine={handleSelectObject}
+              onSelectAnchor={handleSelectAnchor}
+            />
+          ) : (
+            <CodeEditorPanel
+              code={code}
+              onChangeCode={handleCodeChange}
+              selectedLine={selectedLine}
+              selectedObjectId={selectedObjectId}
+              objects={augmentedObjects}
+              definitions={definitions}
+              onSelectLine={handleSelectObject}
+              compileResult={compileResult}
+              isExpanded={false}
+              onToggleExpand={() => {}}
+              onCommitHistory={commitCodeHistory}
+              onUndo={handleUndo}
+              onRedo={handleRedo}
+              isMobileFull={true}
+            />
+          )}
 
-        {/* Right Object Tree & Property Inspector */}
-        <ObjectListSidebar
-          objects={augmentedObjects}
-          definitions={definitions}
-          selectedLine={selectedLine}
-          selectedObjectId={selectedObjectId}
-          activeTargetField={activeTargetField}
-          setActiveTargetField={setActiveTargetField}
-          refInsertion={refInsertion}
-          onSelectObject={handleSelectObject}
-          onUpdateObject={handleUpdateObject}
-          onDeleteObject={handleDeleteObject}
-        />
-      </div>
+          {/* Floating Switch Pill Button for quick 1-tap switching */}
+          <button
+            onClick={() => setMobileTab(prev => (prev === 'canvas' ? 'editor' : 'canvas'))}
+            className="fixed bottom-5 right-5 z-40 bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-2.5 rounded-full shadow-xl flex items-center space-x-2 text-xs font-semibold active:scale-95 transition"
+            title={mobileTab === 'canvas' ? t.common.switchToCode : t.common.switchToRender}
+          >
+            {mobileTab === 'canvas' ? (
+              <>
+                <FileCode2 className="w-4 h-4" />
+                <span>{t.common.codeView}</span>
+              </>
+            ) : (
+              <>
+                <Eye className="w-4 h-4" />
+                <span>{t.common.renderView}</span>
+              </>
+            )}
+          </button>
+        </div>
+      ) : (
+        <>
+          {/* Desktop Middle Main Workspace */}
+          <div className="flex-1 flex overflow-hidden min-h-0 relative">
+            {/* Left Palette & Definitions Sidebar */}
+            <PaletteSidebar
+              width={leftWidth}
+              onInsertSnippet={handleInsertSnippet}
+              definitions={definitions}
+              onSelectLine={(line) => handleSelectObject(line)}
+              onDeleteLine={(line) => handleDeleteObject(line)}
+            />
 
-      {/* 3. Bottom Code Editor & Diagnostics Console */}
-      {isEditorVisible && (
-        <CodeEditorPanel
-          code={code}
-          onChangeCode={handleCodeChange}
-          selectedLine={selectedLine}
-          selectedObjectId={selectedObjectId}
-          objects={augmentedObjects}
-          definitions={definitions}
-          onSelectLine={handleSelectObject}
-          compileResult={compileResult}
-          isExpanded={isEditorExpanded}
-          onToggleExpand={() => setIsEditorExpanded(!isEditorExpanded)}
-          onCommitHistory={commitCodeHistory}
-          onUndo={handleUndo}
-          onRedo={handleRedo}
+            {/* Left Resizer Splitter */}
+            <div
+              onMouseDown={(e) => {
+                e.preventDefault();
+                setIsDraggingLeft(true);
+              }}
+              onDoubleClick={() => setLeftWidth(280)}
+              title="드래그하여 너비 조절 (더블 클릭 시 기본값)"
+              className={`w-1 cursor-col-resize hover:w-1.5 transition-[width,background-color] hover:bg-blue-500 active:bg-blue-600 bg-slate-200 dark:bg-slate-800 z-10 shrink-0 select-none ${
+                isDraggingLeft ? 'bg-blue-500 w-1.5' : ''
+              }`}
+            />
+
+            {/* Center Interactive Canvas */}
+            <CenterStage
+              compileResult={compileResult}
+              objects={augmentedObjects}
+              selectedLine={selectedLine}
+              selectedObjectId={selectedObjectId}
+              activeTargetField={activeTargetField}
+              onSelectLine={handleSelectObject}
+              onSelectAnchor={handleSelectAnchor}
+            />
+
+            {/* Right Resizer Splitter */}
+            <div
+              onMouseDown={(e) => {
+                e.preventDefault();
+                setIsDraggingRight(true);
+              }}
+              onDoubleClick={() => setRightWidth(320)}
+              title="드래그하여 너비 조절 (더블 클릭 시 기본값)"
+              className={`w-1 cursor-col-resize hover:w-1.5 transition-[width,background-color] hover:bg-blue-500 active:bg-blue-600 bg-slate-200 dark:bg-slate-800 z-10 shrink-0 select-none ${
+                isDraggingRight ? 'bg-blue-500 w-1.5' : ''
+              }`}
+            />
+
+            {/* Right Object Tree & Property Inspector */}
+            <ObjectListSidebar
+              width={rightWidth}
+              objects={augmentedObjects}
+              definitions={definitions}
+              selectedLine={selectedLine}
+              selectedObjectId={selectedObjectId}
+              activeTargetField={activeTargetField}
+              setActiveTargetField={setActiveTargetField}
+              refInsertion={refInsertion}
+              onSelectObject={handleSelectObject}
+              onUpdateObject={handleUpdateObject}
+              onDeleteObject={handleDeleteObject}
+            />
+          </div>
+
+          {/* Desktop Bottom Splitter & Code Editor */}
+          {isEditorVisible && (
+            <>
+              {/* Bottom Resizer Splitter */}
+              <div
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  setIsDraggingBottom(true);
+                }}
+                onDoubleClick={() => setBottomHeight(210)}
+                title="드래그하여 높이 조절 (더블 클릭 시 기본값)"
+                className={`h-1 cursor-row-resize hover:h-1.5 transition-[height,background-color] hover:bg-blue-500 active:bg-blue-600 bg-slate-200 dark:bg-slate-800 z-10 shrink-0 select-none ${
+                  isDraggingBottom ? 'bg-blue-500 h-1.5' : ''
+                }`}
+              />
+              <CodeEditorPanel
+                code={code}
+                onChangeCode={handleCodeChange}
+                selectedLine={selectedLine}
+                selectedObjectId={selectedObjectId}
+                objects={augmentedObjects}
+                definitions={definitions}
+                onSelectLine={handleSelectObject}
+                compileResult={compileResult}
+                height={bottomHeight}
+                isExpanded={isEditorExpanded}
+                onToggleExpand={() => setIsEditorExpanded(!isEditorExpanded)}
+                onCommitHistory={commitCodeHistory}
+                onUndo={handleUndo}
+                onRedo={handleRedo}
+              />
+            </>
+          )}
+        </>
+      )}
+
+      {/* Dragging Overlay (prevents pointer swallow and iframe drag issues) */}
+      {(isDraggingLeft || isDraggingRight || isDraggingBottom) && (
+        <div
+          className={`fixed inset-0 z-50 select-none ${
+            isDraggingLeft || isDraggingRight ? 'cursor-col-resize' : 'cursor-row-resize'
+          }`}
         />
       )}
 

@@ -13,6 +13,10 @@ export interface TranslationDictionary {
     add: string;
     wasmTime: string;
     error: string;
+    codeView: string;
+    renderView: string;
+    switchToCode: string;
+    switchToRender: string;
   };
   menu: {
     brand: string;
@@ -190,6 +194,7 @@ export interface TranslationDictionary {
     syntaxErrorPrefix: string;
     jumpToError: string;
     toggleExpand: string;
+    showAutocomplete: string;
   };
   help: {
     modalTitle: string;
