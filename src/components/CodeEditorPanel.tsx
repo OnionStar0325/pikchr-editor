@@ -56,6 +56,7 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
   const highlightRef = useRef<HTMLDivElement>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const isInternalEditorChangeRef = useRef(false);
+  const touchStartYRef = useRef<number | null>(null);
   const lines = code.split('\n');
 
   // 자동완성 상태 관리
@@ -285,8 +286,14 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
   return (
     <div
       style={!isMobileFull && height !== undefined ? { height: `${height}px` } : undefined}
-      className={`bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex flex-col shrink-0 ${
-        isMobileFull ? 'flex-1 h-full w-full border-t-0' : height !== undefined ? '' : isExpanded ? 'h-72' : 'h-48'
+      className={`bg-white dark:bg-slate-900 flex flex-col ${
+        isMobileFull
+          ? 'flex-1 h-full w-full min-h-0 border-t-0'
+          : height !== undefined
+          ? 'shrink-0 border-t border-slate-200 dark:border-slate-800'
+          : isExpanded
+          ? 'h-72 shrink-0 border-t border-slate-200 dark:border-slate-800'
+          : 'h-48 shrink-0 border-t border-slate-200 dark:border-slate-800'
       }`}
     >
       {/* Editor Panel Header / Tab */}
@@ -345,11 +352,25 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
       </div>
 
       {/* Editor Body with Line Numbers */}
-      <div className="flex-1 flex overflow-hidden font-mono text-xs relative">
-        {/* Line Numbers Column (완전한 20px 줄 높이 및 스크롤 동기화) */}
+      <div className="flex-1 min-h-0 flex overflow-hidden font-mono text-xs relative">
+        {/* Line Numbers Column (완전한 20px 줄 높이 및 스크롤 동기화, 모바일 터치 드래그 지원) */}
         <div 
           ref={lineNumbersRef}
-          className="w-12 bg-slate-50 dark:bg-slate-950/80 border-r border-slate-200/80 dark:border-slate-800/80 py-2.5 px-2 text-right select-none text-slate-400 dark:text-slate-500 overflow-hidden shrink-0 font-mono text-xs"
+          style={{ paddingBottom: isMobileFull ? '220px' : '60px' }}
+          onTouchStart={(e) => {
+            touchStartYRef.current = e.touches[0].clientY;
+          }}
+          onTouchMove={(e) => {
+            if (touchStartYRef.current === null || !textareaRef.current) return;
+            const currentY = e.touches[0].clientY;
+            const deltaY = touchStartYRef.current - currentY;
+            touchStartYRef.current = currentY;
+            textareaRef.current.scrollTop += deltaY;
+          }}
+          onTouchEnd={() => {
+            touchStartYRef.current = null;
+          }}
+          className="w-12 bg-slate-50 dark:bg-slate-950/80 border-r border-slate-200/80 dark:border-slate-800/80 pt-2.5 px-2 text-right select-none text-slate-400 dark:text-slate-500 overflow-hidden shrink-0 font-mono text-xs touch-none"
         >
           {lines.map((_, idx) => {
             const lineNum = idx + 1;
@@ -384,13 +405,14 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
         {/* Textarea Code Input (줄바꿈 방지 및 20px 정확한 줄높이 일치, 시각적 하이라이트 오버레이 포함) */}
         <div 
           ref={editorContainerRef}
-          className="flex-1 relative bg-white dark:bg-slate-900/90 overflow-hidden"
+          className="flex-1 min-h-0 relative bg-white dark:bg-slate-900/90 overflow-hidden"
         >
           {/* 시각적 배경 하이라이트 레이어 (텍스트 셀렉션을 유발하지 않고 부드러운 강조 표시) */}
           <div
             ref={highlightRef}
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 py-2.5 px-2.5 font-mono text-xs overflow-hidden select-none whitespace-pre"
+            style={{ paddingBottom: isMobileFull ? '220px' : '60px' }}
+            className="pointer-events-none absolute inset-0 pt-2.5 px-2.5 font-mono text-xs overflow-hidden select-none whitespace-pre"
           >
             {lineDetails.map(({ lineNum, startChar: lineStart, endChar: lineEnd, text }) => {
               const isLineActive = selectedStartLine !== null && selectedEndLine !== null &&
@@ -572,8 +594,11 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
             wrap="off"
             spellCheck={false}
             placeholder={t.editor.placeholder}
-            style={{ lineHeight: '20px' }}
-            className="w-full h-full p-2.5 bg-transparent text-slate-900 dark:text-slate-100 placeholder-slate-400 font-mono text-xs resize-none focus:outline-none leading-[20px] overflow-auto whitespace-pre relative z-10"
+            style={{
+              lineHeight: '20px',
+              paddingBottom: isMobileFull ? '220px' : '60px',
+            }}
+            className="w-full h-full pt-2.5 px-2.5 bg-transparent text-slate-900 dark:text-slate-100 placeholder-slate-400 font-mono text-xs resize-none focus:outline-none leading-[20px] overflow-auto whitespace-pre relative z-10"
           />
 
           {/* 키워드 및 스니펫 자동완성 팝오버 */}
