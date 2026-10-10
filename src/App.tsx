@@ -148,8 +148,13 @@ export const App: React.FC = () => {
 
   const isDarkMode = canvasBg === 'paper-dark' || (canvasBg === 'transparent' && theme === 'dark');
 
+  // 마지막으로 컴파일/렌더링된 코드 추적 (미반영 수정 상태 판정용)
+  const [lastRenderedCode, setLastRenderedCode] = useState<string>(DEFAULT_CODE);
+  const isCodeModified = code !== lastRenderedCode;
+
   // 코드 또는 테마/캔버스 배경 변경 시 컴파일 및 파싱 수행
   const runCompile = useCallback(async (currentCode: string, dark: boolean) => {
+    setLastRenderedCode(currentCode);
     const result = await compilePikchr(currentCode, dark);
     setCompileResult(result);
     if (result.success) {
@@ -298,6 +303,15 @@ export const App: React.FC = () => {
       pushHistoryEntry(newCode);
     }, 1000);
   };
+
+  const handleRenderNow = useCallback(() => {
+    if (editorDebounceRef.current) {
+      clearTimeout(editorDebounceRef.current);
+      editorDebounceRef.current = null;
+    }
+    pushHistoryEntry(code);
+    runCompile(code, isDarkMode);
+  }, [code, isDarkMode, runCompile, pushHistoryEntry]);
 
   const handleSelectObject = (lineNumber: number | null, objId?: string) => {
     setSelectedLine(lineNumber);
@@ -1121,6 +1135,8 @@ export const App: React.FC = () => {
               onUndo={handleUndo}
               onRedo={handleRedo}
               isMobileFull={true}
+              isModified={isCodeModified}
+              onRenderNow={handleRenderNow}
             />
           )}
 
@@ -1239,6 +1255,8 @@ export const App: React.FC = () => {
                 onCommitHistory={commitCodeHistory}
                 onUndo={handleUndo}
                 onRedo={handleRedo}
+                isModified={isCodeModified}
+                onRenderNow={handleRenderNow}
               />
             </>
           )}

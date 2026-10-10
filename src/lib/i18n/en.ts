@@ -195,6 +195,8 @@ export const en: TranslationDictionary = {
     jumpToError: 'Jump to Error Line',
     toggleExpand: 'Toggle Panel Size',
     showAutocomplete: 'Show Autocomplete',
+    modified: 'Modified',
+    clickToRender: 'Click to render now',
   },
   help: {
     modalTitle: 'Pikchr Syntax & Guide',

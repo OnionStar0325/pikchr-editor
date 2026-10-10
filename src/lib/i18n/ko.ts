@@ -195,6 +195,8 @@ export const ko: TranslationDictionary = {
     jumpToError: '오류 줄로 이동',
     toggleExpand: '패널 크기 토글',
     showAutocomplete: '자동완성 컨텍스트 표시',
+    modified: '수정됨',
+    clickToRender: '클릭하여 즉시 렌더링',
   },
   help: {
     modalTitle: 'Pikchr 문법 & 가이드',

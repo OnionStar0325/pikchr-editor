@@ -195,6 +195,8 @@ export const ja: TranslationDictionary = {
     jumpToError: 'エラー行へ移動',
     toggleExpand: 'パネルサイズ切り替え',
     showAutocomplete: '入力補完を表示',
+    modified: '変更あり',
+    clickToRender: 'クリックして今すぐレンダリング',
   },
   help: {
     modalTitle: 'Pikchr構文＆ガイド',

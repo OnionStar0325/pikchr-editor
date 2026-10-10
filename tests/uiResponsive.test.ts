@@ -191,4 +191,49 @@ describe('Responsive and Resizable UI Components', () => {
     // Check that Korean i18n label for autocomplete is rendered
     expect(html).toContain('자동완성 컨텍스트 표시');
   });
+
+  it('renders "수정됨" clickable button when code is modified before rendering', () => {
+    // 1. Not modified: renders "문법 검증 완료"
+    const htmlUnmodified = renderToString(
+      React.createElement(I18nProvider, null,
+        React.createElement(CodeEditorPanel, {
+          code: 'box "Hello"',
+          onChangeCode: () => {},
+          selectedLine: null,
+          selectedObjectId: null,
+          objects: [],
+          definitions: [],
+          onSelectLine: () => {},
+          compileResult: { success: true, svgHtml: '', error: null, durationMs: 1 },
+          isExpanded: false,
+          onToggleExpand: () => {},
+          isModified: false,
+        })
+      )
+    );
+    expect(htmlUnmodified).toContain('문법 검증 완료');
+    expect(htmlUnmodified).not.toContain('수정됨');
+
+    // 2. Modified: renders "수정됨" clickable button
+    const htmlModified = renderToString(
+      React.createElement(I18nProvider, null,
+        React.createElement(CodeEditorPanel, {
+          code: 'box "Hello" 123',
+          onChangeCode: () => {},
+          selectedLine: null,
+          selectedObjectId: null,
+          objects: [],
+          definitions: [],
+          onSelectLine: () => {},
+          compileResult: { success: true, svgHtml: '', error: null, durationMs: 1 },
+          isExpanded: false,
+          onToggleExpand: () => {},
+          isModified: true,
+          onRenderNow: () => {},
+        })
+      )
+    );
+    expect(htmlModified).toContain('수정됨');
+    expect(htmlModified).not.toContain('문법 검증 완료');
+  });
 });

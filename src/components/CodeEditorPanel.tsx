@@ -4,7 +4,8 @@ import {
   CheckCircle2, 
   ChevronUp, 
   ChevronDown, 
-  FileCode2
+  FileCode2,
+  RefreshCw
 } from 'lucide-react';
 import { CompileResult, PikchrObject, PikchrDefinition } from '../lib/types';
 import { useTranslation } from '../lib/i18n';
@@ -31,6 +32,8 @@ interface CodeEditorPanelProps {
   onRedo?: () => void;
   height?: number;
   isMobileFull?: boolean;
+  isModified?: boolean;
+  onRenderNow?: () => void;
 }
 
 export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
@@ -49,6 +52,8 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
   onRedo,
   height,
   isMobileFull,
+  isModified = false,
+  onRenderNow,
 }) => {
   const { t } = useTranslation();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -307,7 +312,17 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
           <div className="w-px h-3.5 bg-slate-300 dark:bg-slate-800 shrink-0" />
 
           {/* Compile Status Pill */}
-          {compileResult.success ? (
+          {isModified ? (
+            <button
+              type="button"
+              onClick={onRenderNow}
+              className="flex items-center space-x-1.5 text-[11px] text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 active:bg-amber-500/30 px-2 py-0.5 rounded cursor-pointer transition font-medium truncate border border-amber-500/30 group"
+              title={t.editor.clickToRender}
+            >
+              <RefreshCw className="w-3.5 h-3.5 shrink-0 group-hover:rotate-180 transition-transform duration-300 text-amber-500" />
+              <span className="truncate font-semibold">{t.editor.modified}</span>
+            </button>
+          ) : compileResult.success ? (
             <div className="flex items-center space-x-1.5 text-[11px] text-emerald-600 dark:text-emerald-400 truncate">
               <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
               <span className="truncate">{t.editor.syntaxOk} ({compileResult.durationMs}ms)</span>
@@ -577,6 +592,11 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
               if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
                 e.preventDefault();
                 if (onRedo) onRedo();
+                return;
+              }
+              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                if (onRenderNow) onRenderNow();
                 return;
               }
               if (e.key === 'Enter' || e.key === ';') {
