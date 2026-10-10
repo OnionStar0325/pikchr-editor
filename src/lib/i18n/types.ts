@@ -195,6 +195,8 @@ export interface TranslationDictionary {
     jumpToError: string;
     toggleExpand: string;
     showAutocomplete: string;
+    modified: string;
+    clickToRender: string;
   };
   help: {
     modalTitle: string;

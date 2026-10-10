@@ -4,7 +4,8 @@ import {
   CheckCircle2, 
   ChevronUp, 
   ChevronDown, 
-  FileCode2
+  FileCode2,
+  RefreshCw
 } from 'lucide-react';
 import { CompileResult, PikchrObject, PikchrDefinition } from '../lib/types';
 import { useTranslation } from '../lib/i18n';
@@ -14,6 +15,90 @@ import { getCompletions } from '../lib/autocomplete/completionEngine';
 import { getCaretCoordinates } from '../lib/autocomplete/caretPosition';
 import { CompletionItem, AutocompleteState } from '../lib/autocomplete/types';
 import { isStatementCompleted } from '../lib/statementDetector';
+
+export interface FocusScrollParams {
+  cursor: number;
+  text: string;
+  scrollTop: number;
+  scrollLeft: number;
+  clientHeight: number;
+  clientWidth: number;
+  lineHeight?: number;
+  paddingTop?: number;
+  topBuffer?: number;
+  bottomBuffer?: number;
+  approxCharWidth?: number;
+}
+
+export interface FocusScrollResult {
+  nextScrollTop?: number;
+  nextScrollLeft?: number;
+  isScrolledVertically: boolean;
+  isScrolledHorizontally: boolean;
+}
+
+/**
+ * 모바일 레이아웃에서 커서(포커스) 위치를 기준으로 스크롤해야 할 목표 위치 계산
+ */
+export function calculateFocusScrollPosition({
+  cursor,
+  text,
+  scrollTop,
+  scrollLeft,
+  clientHeight,
+  clientWidth,
+  lineHeight = 20,
+  paddingTop = 10,
+  topBuffer = 20,
+  bottomBuffer = 50,
+  approxCharWidth = 7.2,
+}: FocusScrollParams): FocusScrollResult {
+  const safeCursor = Math.max(0, Math.min(cursor, text.length));
+  const textBefore = text.substring(0, safeCursor);
+  const lineIndex = textBefore.split('\n').length - 1; // 0-indexed
+  const targetTop = paddingTop + lineIndex * lineHeight;
+  const targetBottom = targetTop + lineHeight;
+
+  const effectiveClientHeight = clientHeight > 0 ? clientHeight : 200;
+  const effectiveClientWidth = clientWidth > 0 ? clientWidth : 300;
+
+  let nextScrollTop: number | undefined = undefined;
+  let isScrolledVertically = false;
+
+  // 커서가 상단 버퍼보다 위에 있거나 하단 버퍼보다 아래에 있으면 화면 중앙 부근으로 이동
+  if (targetTop < scrollTop + topBuffer || targetBottom > scrollTop + effectiveClientHeight - bottomBuffer) {
+    nextScrollTop = Math.max(0, targetTop - Math.floor(effectiveClientHeight / 2));
+    if (nextScrollTop !== scrollTop) {
+      isScrolledVertically = true;
+    }
+  }
+
+  let nextScrollLeft: number | undefined = undefined;
+  let isScrolledHorizontally = false;
+
+  const currentLineText = textBefore.split('\n').pop() || '';
+  const colIndex = currentLineText.length;
+  const targetLeft = 10 + colIndex * approxCharWidth;
+
+  if (targetLeft < scrollLeft + 20) {
+    nextScrollLeft = Math.max(0, targetLeft - 40);
+    if (nextScrollLeft !== scrollLeft) {
+      isScrolledHorizontally = true;
+    }
+  } else if (targetLeft > scrollLeft + effectiveClientWidth - 30) {
+    nextScrollLeft = Math.max(0, targetLeft - effectiveClientWidth + 60);
+    if (nextScrollLeft !== scrollLeft) {
+      isScrolledHorizontally = true;
+    }
+  }
+
+  return {
+    nextScrollTop,
+    nextScrollLeft,
+    isScrolledVertically,
+    isScrolledHorizontally,
+  };
+}
 
 interface CodeEditorPanelProps {
   code: string;
@@ -31,6 +116,8 @@ interface CodeEditorPanelProps {
   onRedo?: () => void;
   height?: number;
   isMobileFull?: boolean;
+  isModified?: boolean;
+  onRenderNow?: () => void;
 }
 
 export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
@@ -49,6 +136,8 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
   onRedo,
   height,
   isMobileFull,
+  isModified = false,
+  onRenderNow,
 }) => {
   const { t } = useTranslation();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -249,9 +338,68 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
       if (textareaRef.current) {
         textareaRef.current.focus();
         textareaRef.current.setSelectionRange(newCursor, newCursor);
+        scrollToFocusPosition(textareaRef.current, newCursor);
       }
       if (onCommitHistory) onCommitHistory();
     }, 0);
+  };
+
+  // 모바일 레이아웃에서 코드 뷰 창에 포커스가 있을 때 포커스(커서/캐럿) 위치로 스크롤을 자동 이동
+  const scrollToFocusPosition = (targetElement?: HTMLTextAreaElement | null, explicitCursor?: number) => {
+    const isMobileLayout = isMobileFull || (typeof window !== 'undefined' && window.innerWidth < 768);
+    if (!isMobileLayout) return;
+
+    const textarea = targetElement || textareaRef.current;
+    if (!textarea) return;
+
+    if (
+      typeof document !== 'undefined' &&
+      document.activeElement &&
+      document.activeElement !== document.body &&
+      document.activeElement !== textarea
+    ) {
+      return;
+    }
+
+    const cursor = explicitCursor !== undefined ? explicitCursor : (textarea.selectionStart ?? 0);
+    const { nextScrollTop, nextScrollLeft, isScrolledVertically, isScrolledHorizontally } = calculateFocusScrollPosition({
+      cursor,
+      text: textarea.value,
+      scrollTop: textarea.scrollTop,
+      scrollLeft: textarea.scrollLeft,
+      clientHeight: textarea.clientHeight,
+      clientWidth: textarea.clientWidth,
+    });
+
+    if (isScrolledVertically && nextScrollTop !== undefined) {
+      textarea.scrollTop = nextScrollTop;
+      if (lineNumbersRef.current) {
+        lineNumbersRef.current.scrollTop = nextScrollTop;
+      }
+      if (highlightRef.current) {
+        highlightRef.current.scrollTop = nextScrollTop;
+      }
+    }
+
+    if (isScrolledHorizontally && nextScrollLeft !== undefined) {
+      textarea.scrollLeft = nextScrollLeft;
+      if (highlightRef.current) {
+        highlightRef.current.scrollLeft = nextScrollLeft;
+      }
+    }
+  };
+
+  const handleKeyInputScroll = (targetElement?: HTMLTextAreaElement | null) => {
+    scrollToFocusPosition(targetElement);
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => {
+        scrollToFocusPosition(targetElement);
+      });
+    } else {
+      setTimeout(() => {
+        scrollToFocusPosition(targetElement);
+      }, 0);
+    }
   };
 
   // statement 단위 스크롤 동기화 (네이티브 텍스트 selectionRange는 실행하지 않고 시각적 하이라이트만 제공)
@@ -307,7 +455,17 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
           <div className="w-px h-3.5 bg-slate-300 dark:bg-slate-800 shrink-0" />
 
           {/* Compile Status Pill */}
-          {compileResult.success ? (
+          {isModified ? (
+            <button
+              type="button"
+              onClick={onRenderNow}
+              className="flex items-center space-x-1.5 text-[11px] text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 active:bg-amber-500/30 px-2 py-0.5 rounded cursor-pointer transition font-medium truncate border border-amber-500/30 group"
+              title={t.editor.clickToRender}
+            >
+              <RefreshCw className="w-3.5 h-3.5 shrink-0 group-hover:rotate-180 transition-transform duration-300 text-amber-500" />
+              <span className="truncate font-semibold">{t.editor.modified}</span>
+            </button>
+          ) : compileResult.success ? (
             <div className="flex items-center space-x-1.5 text-[11px] text-emerald-600 dark:text-emerald-400 truncate">
               <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
               <span className="truncate">{t.editor.syntaxOk} ({compileResult.durationMs}ms)</span>
@@ -477,6 +635,8 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
               const isCompleted = isStatementCompleted(code, val, cursor);
               onChangeCode(val, isCompleted);
               updateAutocomplete(val, cursor);
+              scrollToFocusPosition(e.target, cursor);
+              handleKeyInputScroll(e.target);
             }}
             onClick={(e) => {
               handleCursorSync(e);
@@ -484,6 +644,7 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
               updateAutocomplete(code, cursor);
             }}
             onKeyUp={(e) => {
+              handleKeyInputScroll(e.currentTarget);
               // 자동완성 팝오버 키보드 조작 중에는 updateAutocomplete 및 커서 재계산 건너뛰기 (선택 인덱스 초기화 버그 방지)
               if (autocomplete.isOpen && ['ArrowUp', 'ArrowDown', 'Enter', 'Tab', 'Escape', 'PageUp', 'PageDown'].includes(e.key)) {
                 return;
@@ -496,6 +657,7 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
             }}
             onKeyDown={(e) => {
               isInternalEditorChangeRef.current = true;
+              handleKeyInputScroll(e.currentTarget);
 
               // 수동 호출 단축키: Ctrl+Space 또는 Cmd+Space
               if ((e.ctrlKey || e.metaKey) && e.code === 'Space') {
@@ -577,6 +739,11 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
               if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
                 e.preventDefault();
                 if (onRedo) onRedo();
+                return;
+              }
+              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                if (onRenderNow) onRenderNow();
                 return;
               }
               if (e.key === 'Enter' || e.key === ';') {
