@@ -20,6 +20,7 @@ interface AutocompletePopoverProps {
   position: CaretCoordinates;
   onSelect: (item: CompletionItem) => void;
   onClose: () => void;
+  textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
   containerRef?: React.RefObject<HTMLDivElement | null>;
 }
 
@@ -29,6 +30,7 @@ export const AutocompletePopover: React.FC<AutocompletePopoverProps> = ({
   selectedIndex,
   position,
   onSelect,
+  textareaRef,
   containerRef,
 }) => {
   const listRef = useRef<HTMLDivElement>(null);
@@ -109,20 +111,51 @@ export const AutocompletePopover: React.FC<AutocompletePopoverProps> = ({
     }
   };
 
-  // Adjust positioning within container bounds
-  const containerWidth = containerRef?.current?.clientWidth || 800;
-  const containerHeight = containerRef?.current?.clientHeight || 400;
+  // Viewport-aware layout calculation
+  const winWidth = typeof window !== 'undefined' ? window.innerWidth : 800;
+  const winHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
 
-  const popoverWidth = 420;
+  // Responsive popover width: on small screens fit within viewport
+  const popoverWidth = Math.min(440, Math.max(280, winWidth - 24));
   const popoverMaxHeight = 220;
 
-  let leftPos = Math.min(position.left, containerWidth - popoverWidth - 20);
-  leftPos = Math.max(10, leftPos);
+  let caretX = position.left;
+  let caretY = position.top;
 
-  let topPos = position.top + position.lineHeight + 6;
-  // If popover overflows bottom, show above caret
-  if (topPos + popoverMaxHeight > containerHeight && position.top > popoverMaxHeight) {
-    topPos = Math.max(10, position.top - popoverMaxHeight - 6);
+  if (textareaRef?.current) {
+    const rect = textareaRef.current.getBoundingClientRect();
+    caretX = rect.left + position.left;
+    caretY = rect.top + position.top;
+  } else if (containerRef?.current) {
+    const rect = containerRef.current.getBoundingClientRect();
+    caretX = rect.left + position.left;
+    caretY = rect.top + position.top;
+  }
+
+  // Ensure horizontal fit in viewport
+  let leftPos = caretX;
+  if (leftPos + popoverWidth > winWidth - 12) {
+    leftPos = winWidth - popoverWidth - 12;
+  }
+  leftPos = Math.max(12, leftPos);
+
+  // Vertical fit: decide whether to show below or above caret
+  const lineHeight = position.lineHeight || 20;
+  const spaceBelow = winHeight - (caretY + lineHeight);
+  const spaceAbove = caretY;
+
+  let topPos: number;
+  if (spaceBelow < popoverMaxHeight + 10 && spaceAbove >= popoverMaxHeight) {
+    // Show above caret
+    topPos = Math.max(10, caretY - popoverMaxHeight - 6);
+  } else if (spaceBelow >= popoverMaxHeight + 10) {
+    // Show below caret
+    topPos = caretY + lineHeight + 6;
+  } else {
+    // Best fit
+    topPos = spaceAbove > spaceBelow
+      ? Math.max(10, caretY - popoverMaxHeight - 6)
+      : Math.min(winHeight - popoverMaxHeight - 10, caretY + lineHeight + 6);
   }
 
   return (
@@ -130,13 +163,15 @@ export const AutocompletePopover: React.FC<AutocompletePopoverProps> = ({
       style={{
         top: `${topPos}px`,
         left: `${leftPos}px`,
+        width: `${popoverWidth}px`,
+        maxHeight: `${popoverMaxHeight}px`,
       }}
-      className="absolute z-50 flex shadow-xl rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden font-sans text-xs select-none animate-in fade-in zoom-in-95 duration-100 max-w-[460px] w-[440px]"
+      className="fixed z-[9999] flex shadow-2xl rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden font-sans text-xs select-none animate-in fade-in zoom-in-95 duration-100"
     >
       {/* 1. Left: Completion List */}
       <div 
         ref={listRef}
-        className="w-[230px] max-h-[220px] overflow-y-auto p-1 divide-y divide-slate-100 dark:divide-slate-800/60 shrink-0 border-r border-slate-100 dark:border-slate-800"
+        className={`${popoverWidth < 360 ? 'w-full' : 'w-[220px]'} max-h-[220px] overflow-y-auto p-1 divide-y divide-slate-100 dark:divide-slate-800/60 shrink-0 ${popoverWidth >= 360 ? 'border-r border-slate-100 dark:border-slate-800' : ''}`}
       >
         {items.map((item, idx) => {
           const isSelected = idx === selectedIndex;
@@ -183,33 +218,35 @@ export const AutocompletePopover: React.FC<AutocompletePopoverProps> = ({
       </div>
 
       {/* 2. Right: Documentation / Details Panel */}
-      <div className="flex-1 p-3 bg-slate-50/70 dark:bg-slate-950/60 flex flex-col justify-between overflow-hidden text-slate-600 dark:text-slate-300">
-        <div className="space-y-1.5 overflow-y-auto max-h-[170px] pr-1">
-          <div className="flex items-center space-x-1.5 text-xs font-semibold text-slate-900 dark:text-slate-100 pb-1 border-b border-slate-200 dark:border-slate-800">
-            <FileCode2 className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-            <span className="font-mono">{currentItem?.label}</span>
+      {popoverWidth >= 360 && (
+        <div className="flex-1 p-3 bg-slate-50/70 dark:bg-slate-950/60 flex flex-col justify-between overflow-hidden text-slate-600 dark:text-slate-300">
+          <div className="space-y-1.5 overflow-y-auto max-h-[170px] pr-1">
+            <div className="flex items-center space-x-1.5 text-xs font-semibold text-slate-900 dark:text-slate-100 pb-1 border-b border-slate-200 dark:border-slate-800">
+              <FileCode2 className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+              <span className="font-mono">{currentItem?.label}</span>
+            </div>
+
+            {currentItem?.detail && (
+              <p className="text-[11px] font-medium text-slate-700 dark:text-slate-300">
+                {currentItem.detail}
+              </p>
+            )}
+
+            {currentItem?.documentation && (
+              <div className="text-[10.5px] leading-relaxed text-slate-500 dark:text-slate-400 whitespace-pre-wrap font-sans">
+                {currentItem.documentation}
+              </div>
+            )}
           </div>
 
-          {currentItem?.detail && (
-            <p className="text-[11px] font-medium text-slate-700 dark:text-slate-300">
-              {currentItem.detail}
-            </p>
-          )}
-
-          {currentItem?.documentation && (
-            <div className="text-[10.5px] leading-relaxed text-slate-500 dark:text-slate-400 whitespace-pre-wrap font-sans">
-              {currentItem.documentation}
-            </div>
-          )}
+          {/* Footer Shortcut Hints */}
+          <div className="pt-2 mt-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500 select-none">
+            <span>↑↓ 탐색</span>
+            <span>Enter/Tab 완성</span>
+            <span>Esc 닫기</span>
+          </div>
         </div>
-
-        {/* Footer Shortcut Hints */}
-        <div className="pt-2 mt-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500 select-none">
-          <span>↑↓ 탐색</span>
-          <span>Enter/Tab 완성</span>
-          <span>Esc 닫기</span>
-        </div>
-      </div>
+      )}
     </div>
   );
 };

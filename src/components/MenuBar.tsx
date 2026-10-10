@@ -93,11 +93,11 @@ export const MenuBar: React.FC<MenuBarProps> = ({
       {/* Left: Brand + Desktop Menu Bar */}
       <div className="flex items-center space-x-1">
         {/* App Logo */}
-        <div className="flex items-center space-x-2 mr-3 px-1.5 py-1 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="w-4 h-4 rounded bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center">
+        <div className="flex items-center space-x-2 mr-1 sm:mr-3 px-1.5 py-1 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+          <div className="w-4 h-4 rounded bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shrink-0">
             <Code2 className="w-3 h-3 text-white" />
           </div>
-          <span className="font-bold tracking-wider text-[11px] text-slate-900 dark:text-slate-100">{t.menu.brand}</span>
+          <span className="font-bold tracking-wider text-[11px] text-slate-900 dark:text-slate-100 hidden sm:inline">{t.menu.brand}</span>
         </div>
 
         {/* 1. File Menu */}
@@ -357,7 +357,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
         </div>
 
         {/* Compilation Status Pill */}
-        <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[11px] shadow-2xs">
+        <div className="hidden md:flex items-center space-x-1.5 px-2.5 py-1 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[11px] shadow-2xs">
           <div className={`w-2 h-2 rounded-full ${compileSuccess ? 'bg-emerald-500' : 'bg-rose-500 animate-pulse'}`} />
           <span className="font-mono text-slate-700 dark:text-slate-300">
             {compileSuccess ? `${t.common.wasmTime} (${durationMs}ms)` : t.common.error}
@@ -367,7 +367,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
         {/* Copy Button */}
         <button
           onClick={onCopyCode}
-          className="flex items-center space-x-1 px-2.5 py-1 rounded bg-white dark:bg-slate-900 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-[11px] text-slate-700 dark:text-slate-300 transition shadow-2xs"
+          className="hidden sm:flex items-center space-x-1 px-2.5 py-1 rounded bg-white dark:bg-slate-900 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-[11px] text-slate-700 dark:text-slate-300 transition shadow-2xs"
         >
           {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
           <span>{isCopied ? t.common.copied : t.common.copy}</span>
@@ -376,10 +376,10 @@ export const MenuBar: React.FC<MenuBarProps> = ({
         {/* Export SVG */}
         <button
           onClick={onExportSvg}
-          className="flex items-center space-x-1 px-2.5 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium text-[11px] transition shadow"
+          className="flex items-center space-x-1 px-2 sm:px-2.5 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium text-[11px] transition shadow"
         >
           <FileCode className="w-3.5 h-3.5" />
-          <span>{t.common.download}</span>
+          <span className="hidden xs:inline">{t.common.download}</span>
         </button>
       </div>
     </nav>

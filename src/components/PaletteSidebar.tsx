@@ -35,6 +35,7 @@ interface PaletteSidebarProps {
   definitions: PikchrDefinition[];
   onSelectLine: (lineNumber: number) => void;
   onDeleteLine: (lineNumber: number) => void;
+  width?: number;
 }
 
 export const PaletteSidebar: React.FC<PaletteSidebarProps> = ({
@@ -42,6 +43,7 @@ export const PaletteSidebar: React.FC<PaletteSidebarProps> = ({
   definitions,
   onSelectLine,
   onDeleteLine,
+  width,
 }) => {
   const { t } = useTranslation();
   const [mainTab, setMainTab] = useState<'palette' | 'definitions'>('palette');
@@ -358,7 +360,10 @@ box "Error" fill 0xfee2e2 fit`,
   };
 
   return (
-    <aside className="w-72 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col shrink-0 select-none overflow-hidden text-slate-700 dark:text-slate-200 transition-colors">
+    <aside
+      style={width ? { width: `${width}px` } : undefined}
+      className={`${width ? '' : 'w-72'} bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col shrink-0 select-none overflow-hidden text-slate-700 dark:text-slate-200 transition-colors`}
+    >
       {/* 1. Main Navigation Switcher */}
       <div className="p-2 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/80">
         <div className="grid grid-cols-2 gap-1 bg-slate-200/70 dark:bg-slate-900 p-1 rounded-lg border border-slate-300/60 dark:border-slate-800">

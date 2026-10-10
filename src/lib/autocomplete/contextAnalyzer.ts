@@ -106,6 +106,10 @@ export function analyzeAutocompleteContext(
   let contextType: AutocompleteContextType = 'general';
   let targetObject: string | undefined = undefined;
 
+  const textBeforePrefix = rawPrefix.length > 0
+    ? textBeforeCursorOnLine.slice(0, -rawPrefix.length)
+    : textBeforeCursorOnLine;
+
   // Case A: 점 '.' 직후 또는 .로 시작하는 prefix (앵커/점속성)
   if (rawPrefix.startsWith('.') || (cursor > 0 && source[cursor - 1] === '.')) {
     contextType = 'dot';
@@ -120,22 +124,22 @@ export function analyzeAutocompleteContext(
     }
   }
   // Case B: 색상 속성 직후 ('color', 'fill', 'color =', 'fill =')
-  else if (/\b(color|fill)\s*(=)?\s*$/i.test(textBeforeCursorOnLine.trimEnd().slice(0, -(rawPrefix.length)))) {
+  else if (/\b(color|fill)\s*(=)?\s*$/i.test(textBeforePrefix)) {
     contextType = 'color';
   }
   // Case C: 경로/선분 문맥 ('from', 'to', 'then', 'go', 'arrow', 'line', 'spline')
-  else if (/\b(from|to|then|go|until|heading)\s*$/i.test(textBeforeCursorOnLine.trimEnd().slice(0, -(rawPrefix.length)))) {
+  else if (/\b(from|to|then|go|until|heading)\s*$/i.test(textBeforePrefix)) {
     contextType = 'path';
   }
   // Case D: 상대 참조 문맥 ('same as', 'behind', 'between', 'vertex of')
-  else if (/\b(same\s+as|behind|between|vertex\s+of)\s*$/i.test(textBeforeCursorOnLine.trimEnd().slice(0, -(rawPrefix.length)))) {
+  else if (/\b(same\s+as|behind|between|vertex\s+of)\s*$/i.test(textBeforePrefix)) {
     contextType = 'relative';
   }
   // Case E: 문장/라인 시작 (새 도형/선언/방향 정의)
   else if (
     tokens.length === 0 || 
     (tokens.length === 1 && rawPrefix === tokens[0]) ||
-    /^[A-Z][a-zA-Z0-9_]*\s*:\s*$/i.test(textBeforeInStmt.slice(0, -(rawPrefix.length)).trim())
+    /^[A-Z][a-zA-Z0-9_]*\s*:\s*$/i.test(textBeforeInStmt.slice(0, -(rawPrefix.length || 0)).trim())
   ) {
     contextType = 'stmt_start';
   }

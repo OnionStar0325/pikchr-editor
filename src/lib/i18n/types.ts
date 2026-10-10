@@ -13,6 +13,10 @@ export interface TranslationDictionary {
     add: string;
     wasmTime: string;
     error: string;
+    codeView: string;
+    renderView: string;
+    switchToCode: string;
+    switchToRender: string;
   };
   menu: {
     brand: string;

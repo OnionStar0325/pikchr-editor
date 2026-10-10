@@ -13,6 +13,10 @@ export const ko: TranslationDictionary = {
     add: '추가',
     wasmTime: 'WASM',
     error: '구문 오류',
+    codeView: '코드 뷰',
+    renderView: '렌더링 결과',
+    switchToCode: '코드 보기',
+    switchToRender: '결과 보기',
   },
   menu: {
     brand: 'Pikchr Editor',

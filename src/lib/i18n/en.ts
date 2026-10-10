@@ -13,6 +13,10 @@ export const en: TranslationDictionary = {
     add: 'Add',
     wasmTime: 'WASM',
     error: 'Syntax Error',
+    codeView: 'Code View',
+    renderView: 'Render Result',
+    switchToCode: 'View Code',
+    switchToRender: 'View Diagram',
   },
   menu: {
     brand: 'Pikchr Editor',

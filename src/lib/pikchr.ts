@@ -1,4 +1,5 @@
 import { CompileResult, CompileError, PikchrObject, PikchrDefinition, PikchrShapeType, PathSegment } from './types';
+export { isContinuationLine, containsStatementTerminator, isStatementCompleted } from './statementDetector';
 
 // Pikchr WASM / JS 컴파일러 인스턴스
 let pikchrInstance: ((source: string, classname?: string, flags?: number) => string) | null = null;

@@ -13,6 +13,10 @@ export const ja: TranslationDictionary = {
     add: '追加',
     wasmTime: 'WASM',
     error: '構文エラー',
+    codeView: 'コードビュー',
+    renderView: 'プレビュー',
+    switchToCode: 'コード表示',
+    switchToRender: '図を表示',
   },
   menu: {
     brand: 'Pikchr Editor',
