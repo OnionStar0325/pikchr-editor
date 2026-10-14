@@ -16,6 +16,79 @@ import { getCaretCoordinates } from '../lib/autocomplete/caretPosition';
 import { CompletionItem, AutocompleteState } from '../lib/autocomplete/types';
 import { isStatementCompleted } from '../lib/statementDetector';
 
+export const AUTOCOMPLETE_DEBOUNCE_MS = 500;
+
+export const CURSOR_MOVE_KEYS = [
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+  'Home',
+  'End',
+  'PageUp',
+  'PageDown',
+];
+
+export function isCursorMoveKey(key: string): boolean {
+  return CURSOR_MOVE_KEYS.includes(key);
+}
+
+export interface AutocompleteInterlockManagerOptions {
+  debounceMs?: number;
+  onOpen: (text: string, cursor: number) => void;
+  onClose: () => void;
+  isEnabled: () => boolean;
+}
+
+export function createAutocompleteInterlockManager(options: AutocompleteInterlockManagerOptions) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const debounceMs = options.debounceMs ?? AUTOCOMPLETE_DEBOUNCE_MS;
+
+  const cancelTimer = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  };
+
+  const handleKeyInput = (text: string, cursor: number) => {
+    cancelTimer();
+    options.onClose();
+    if (!options.isEnabled()) return;
+    timer = setTimeout(() => {
+      options.onOpen(text, cursor);
+      timer = null;
+    }, debounceMs);
+  };
+
+  const handleCursorMoveKey = (key: string) => {
+    if (CURSOR_MOVE_KEYS.includes(key)) {
+      cancelTimer();
+      options.onClose();
+    }
+  };
+
+  const handleMouseClick = () => {
+    cancelTimer();
+    options.onClose();
+  };
+
+  const handleManualTrigger = (text: string, cursor: number) => {
+    cancelTimer();
+    if (!options.isEnabled()) return;
+    options.onOpen(text, cursor);
+  };
+
+  return {
+    cancelTimer,
+    handleKeyInput,
+    handleCursorMoveKey,
+    handleMouseClick,
+    handleManualTrigger,
+    hasActiveTimer: () => timer !== null,
+  };
+}
+
 export interface FocusScrollParams {
   cursor: number;
   text: string;
@@ -146,6 +219,10 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const isInternalEditorChangeRef = useRef(false);
   const touchStartYRef = useRef<number | null>(null);
+  const objectsRef = useRef(objects);
+  objectsRef.current = objects;
+  const definitionsRef = useRef(definitions);
+  definitionsRef.current = definitions;
   const lines = code.split('\n');
 
   // 자동완성 상태 관리
@@ -165,6 +242,9 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
     }
     return true;
   });
+
+  const isAutocompleteEnabledRef = useRef(isAutocompleteEnabled);
+  isAutocompleteEnabledRef.current = isAutocompleteEnabled;
 
   useEffect(() => {
     localStorage.setItem('pikchr_enable_autocomplete', String(isAutocompleteEnabled));
@@ -291,7 +371,7 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
       return;
     }
 
-    const completions = getCompletions(ctx, objects, definitions);
+    const completions = getCompletions(ctx, objectsRef.current, definitionsRef.current);
     if (completions.length === 0) {
       setAutocomplete(prev => ({ ...prev, isOpen: false }));
       return;
@@ -323,6 +403,7 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
 
   // 자동완성 항목 적용 (Insert)
   const handleApplyCompletion = (item: CompletionItem) => {
+    autocompleteManager.cancelTimer();
     if (!autocomplete.context || !textareaRef.current) return;
     const { replaceStart, replaceEnd } = autocomplete.context;
 
@@ -343,6 +424,25 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
       if (onCommitHistory) onCommitHistory();
     }, 0);
   };
+
+  const autocompleteManager = useMemo(() => {
+    return createAutocompleteInterlockManager({
+      debounceMs: AUTOCOMPLETE_DEBOUNCE_MS,
+      isEnabled: () => isAutocompleteEnabledRef.current,
+      onClose: () => {
+        setAutocomplete(prev => (prev.isOpen ? { ...prev, isOpen: false } : prev));
+      },
+      onOpen: (text, cursor) => {
+        updateAutocomplete(text, cursor);
+      },
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      autocompleteManager.cancelTimer();
+    };
+  }, [autocompleteManager]);
 
   // 모바일 레이아웃에서 코드 뷰 창에 포커스가 있을 때 포커스(커서/캐럿) 위치로 스크롤을 자동 이동
   const scrollToFocusPosition = (targetElement?: HTMLTextAreaElement | null, explicitCursor?: number) => {
@@ -487,6 +587,7 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
               onChange={(e) => {
                 const checked = e.target.checked;
                 setIsAutocompleteEnabled(checked);
+                autocompleteManager.cancelTimer();
                 if (!checked) {
                   setAutocomplete(prev => ({ ...prev, isOpen: false }));
                 }
@@ -634,14 +735,20 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
               const cursor = e.target.selectionStart;
               const isCompleted = isStatementCompleted(code, val, cursor);
               onChangeCode(val, isCompleted);
-              updateAutocomplete(val, cursor);
               scrollToFocusPosition(e.target, cursor);
               handleKeyInputScroll(e.target);
+
+              // 키 입력 시 팝업 닫고, 키 입력 멈춘 후 0.5초 경과 후 보여지도록 타이머 설정
+              autocompleteManager.handleKeyInput(val, cursor);
+            }}
+            onMouseDown={() => {
+              // 마우스 클릭/다운 인터락: 팝업을 보이지 않도록 함
+              autocompleteManager.handleMouseClick();
             }}
             onClick={(e) => {
               handleCursorSync(e);
-              const cursor = (e.target as HTMLTextAreaElement).selectionStart;
-              updateAutocomplete(code, cursor);
+              // 마우스 클릭 인터락: 팝업을 보이지 않도록 함
+              autocompleteManager.handleMouseClick();
             }}
             onKeyUp={(e) => {
               handleKeyInputScroll(e.currentTarget);
@@ -649,24 +756,25 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
               if (autocomplete.isOpen && ['ArrowUp', 'ArrowDown', 'Enter', 'Tab', 'Escape', 'PageUp', 'PageDown'].includes(e.key)) {
                 return;
               }
-              if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown'].includes(e.key)) {
+              if (CURSOR_MOVE_KEYS.includes(e.key)) {
                 handleCursorSync(e);
-                const cursor = (e.target as HTMLTextAreaElement).selectionStart;
-                updateAutocomplete(code, cursor);
+                // 커서 위치 변경 키는 팝업을 보이지 않도록 인터락: 팝업 닫기 및 타이머 취소
+                autocompleteManager.handleCursorMoveKey(e.key);
               }
             }}
             onKeyDown={(e) => {
               isInternalEditorChangeRef.current = true;
               handleKeyInputScroll(e.currentTarget);
 
-              // 수동 호출 단축키: Ctrl+Space 또는 Cmd+Space
-              if ((e.ctrlKey || e.metaKey) && e.code === 'Space') {
+              // 수동 호출 단축키: Ctrl+Space 또는 Cmd+Space (0.5초 대기 없이 즉시 호출)
+              if ((e.ctrlKey || e.metaKey) && (e.code === 'Space' || e.key === ' ')) {
+                autocompleteManager.cancelTimer();
                 if (!isAutocompleteEnabled) return;
                 e.preventDefault();
                 const cursor = e.currentTarget.selectionStart;
                 const ctx = analyzeAutocompleteContext(code, cursor);
                 if (ctx) {
-                  const completions = getCompletions(ctx, objects, definitions);
+                  const completions = getCompletions(ctx, objectsRef.current, definitionsRef.current);
                   if (completions.length > 0 && textareaRef.current) {
                     const pos = getCaretCoordinates(textareaRef.current, cursor);
                     setAutocomplete({
@@ -701,11 +809,13 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
                 }
                 if (e.key === 'Enter' || e.key === 'Tab') {
                   e.preventDefault();
+                  autocompleteManager.cancelTimer();
                   handleApplyCompletion(autocomplete.items[autocomplete.selectedIndex]);
                   return;
                 }
                 if (e.key === 'Escape') {
                   e.preventDefault();
+                  autocompleteManager.cancelTimer();
                   setAutocomplete(prev => ({ ...prev, isOpen: false }));
                   return;
                 }
@@ -725,6 +835,11 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
                   }));
                   return;
                 }
+              }
+
+              // 커서 위치가 변경되는 키 입력 시 팝업 인터락 (타이머 취소 및 팝업 닫기)
+              if (CURSOR_MOVE_KEYS.includes(e.key)) {
+                autocompleteManager.handleCursorMoveKey(e.key);
               }
 
               if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
@@ -751,6 +866,7 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
               }
             }}
             onBlur={() => {
+              autocompleteManager.cancelTimer();
               // 팝오버 클릭 이벤트 처리를 위해 약간의 지연 후 닫기
               setTimeout(() => {
                 setAutocomplete(prev => ({ ...prev, isOpen: false }));
