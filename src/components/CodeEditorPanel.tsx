@@ -305,23 +305,52 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
     isInternalEditorChangeRef.current = true;
     const cursor = (e.target as HTMLTextAreaElement).selectionStart;
 
+    // 현재 커서가 속한 1-based 라인 번호 계산
+    let cursorLine = 1;
+    let runningOffset = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const nextOffset = runningOffset + lines[i].length + 1; // +1 for newline
+      if (cursor < nextOffset) {
+        cursorLine = i + 1;
+        break;
+      }
+      runningOffset = nextOffset;
+    }
+
     // 1. 오브젝트 및 정의 목록을 startChar 기준으로 정렬하여 탐색
     const allItems = [...objects, ...definitions]
       .filter(item => item.startChar !== undefined && item.endChar !== undefined)
       .sort((a, b) => a.startChar! - b.startChar!);
 
-    // 1차: 구문 텍스트 내부에 커서가 위치하는 경우
-    let matched = allItems.find(item => cursor >= item.startChar! && cursor <= item.endChar!);
+    // 1차: 구문 텍스트 내부에 커서가 위치하는 경우 (동일 라인 우선 매칭)
+    let matched = allItems.find(
+      item => cursor >= item.startChar! && cursor <= item.endChar! &&
+        item.lineNumber <= cursorLine && (item.endLineNumber || item.lineNumber) >= cursorLine
+    );
 
-    // 2차: box; box; box; 등 한 줄에 여러 구문이 있을 때 세미콜론/공백 위치 커서 매핑
+    // 1-2차: 줄 번호 범위와 무관하게 텍스트 내부에 커서가 위치하는 경우
+    if (!matched) {
+      matched = allItems.find(item => cursor >= item.startChar! && cursor <= item.endChar!);
+    }
+
+    // 2차: 동일 라인 내에 복수 구문이 있을 때 (세미콜론/공백 위치 커서 매핑)
     if (!matched && allItems.length > 0) {
-      for (let i = 0; i < allItems.length; i++) {
-        const cur = allItems[i];
-        const next = allItems[i + 1];
-        const nextStart = next ? next.startChar! : Infinity;
-        if (cursor >= cur.startChar! && cursor < nextStart) {
-          matched = cur;
-          break;
+      const sameLineItems = allItems.filter(
+        item => item.lineNumber <= cursorLine && (item.endLineNumber || item.lineNumber) >= cursorLine
+      );
+      if (sameLineItems.length > 0) {
+        for (let i = 0; i < sameLineItems.length; i++) {
+          const cur = sameLineItems[i];
+          const next = sameLineItems[i + 1];
+          const nextStart = next ? next.startChar! : Infinity;
+          if (cursor >= cur.startChar! && cursor < nextStart) {
+            matched = cur;
+            break;
+          }
+        }
+        if (!matched) {
+          // 커서가 라인 시작 공백 등에 있을 경우 해당 라인의 첫 번째 아이템 매칭
+          matched = sameLineItems[0];
         }
       }
     }
@@ -333,16 +362,11 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
       return;
     }
 
-    // 3. Fallback: 줄 번호 계산
-    let currentChars = 0;
-    for (let i = 0; i < lines.length; i++) {
-      currentChars += lines[i].length + 1;
-      if (cursor < currentChars) {
-        const objOnLine = objects.find(o => o.lineNumber === i + 1);
-        onSelectLine(i + 1, objOnLine?.id);
-        break;
-      }
-    }
+    // 3. Fallback: 줄 번호 기반 객체 매칭
+    const objOnLine = objects.find(
+      o => o.lineNumber <= cursorLine && (o.endLineNumber || o.lineNumber) >= cursorLine
+    );
+    onSelectLine(cursorLine, objOnLine?.id);
   };
 
   // 자동완성 문맥 분석 및 팝오버 갱신
