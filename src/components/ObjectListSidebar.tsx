@@ -746,9 +746,6 @@ export const ObjectListSidebar: React.FC<ObjectListSidebarProps> = ({
             {t.inspector.statementsTitle} ({objects.length})
           </span>
         </div>
-        <span className="px-1.5 py-0.5 text-[11px] bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-400 rounded-full font-mono">
-          {objects.length} {t.common.items}
-        </span>
       </div>
 
       {/* 2. Object Tree View */}

@@ -144,6 +144,7 @@ export interface FitAttributeNode extends BaseNode {
 export interface StyleAttributeNode extends BaseNode {
   type: 'StyleAttribute';
   property: 'fill' | 'color' | 'dashed' | 'dotted' | 'thin' | 'thick' | 'invis';
+  rawProperty?: string;
   value?: ExpressionNode;
 }
 
@@ -179,6 +180,7 @@ export interface WaypointAttributeNode extends BaseNode {
 export interface ArcAttributeNode extends BaseNode {
   type: 'ArcAttribute';
   property: 'cw' | 'ccw' | 'arrow_head';
+  rawProperty?: string;
   value?: string;
 }
 

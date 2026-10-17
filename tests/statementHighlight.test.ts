@@ -3,7 +3,8 @@ import React from 'react';
 import { renderToString } from 'react-dom/server';
 import { parseObjectsFromSource, compilePikchr, extractConnectorPath, updateMultiLineStatement } from '../src/lib/pikchr';
 import { EXAMPLES } from '../src/lib/examples';
-import { CodeEditorPanel } from '../src/components/CodeEditorPanel';
+import { CodeEditorPanel, shouldDeselectOnEmptyLine } from '../src/components/CodeEditorPanel';
+import { ObjectListSidebar } from '../src/components/ObjectListSidebar';
 import { I18nProvider } from '../src/lib/i18n';
 
 beforeAll(() => {
@@ -295,6 +296,81 @@ describe('Statement Highlight and Inline Statements (box; box; box;)', () => {
       expect(updated).toContain('at Pager.c fill 0xd0ece8 behind In thick');
     });
 
+    it('preserves multi-strings and keyword synonyms when adding dashed to single-line statement', () => {
+      const code = 'CG: box same ht 200% "Code" "Generator"';
+      const objs = parseObjectsFromSource(code);
+      expect(objs).toHaveLength(1);
+
+      // Add dashed
+      const updated = updateMultiLineStatement(
+        objs[0].rawStatement,
+        objs[0],
+        { dash: 'dashed' }
+      );
+
+      // Expected: "Code" "Generator" and ht 200% must be preserved, dashed added
+      expect(updated).toBe('CG: box same ht 200% "Code" "Generator" dashed');
+    });
+
+    it('preserves ht synonym and multi-strings when updating height on single-line statement', () => {
+      const code = 'CG: box same ht 200% "Code" "Generator"';
+      const objs = parseObjectsFromSource(code);
+      expect(objs).toHaveLength(1);
+
+      // Change height to 150%
+      const updated = updateMultiLineStatement(
+        objs[0].rawStatement,
+        objs[0],
+        { height: '150%' }
+      );
+
+      expect(updated).toBe('CG: box same ht 150% "Code" "Generator"');
+    });
+
+    it('preserves existing synonym keywords: wid, width, rad, radius, diam, diameter, invis, invisible', () => {
+      // wid
+      const widObj = parseObjectsFromSource('box wid 150% ht 75%')[0];
+      expect(updateMultiLineStatement(widObj.rawStatement, widObj, { width: '180%' })).toBe('box wid 180% ht 75%');
+
+      // width
+      const widthObj = parseObjectsFromSource('box width 150% height 75%')[0];
+      expect(updateMultiLineStatement(widthObj.rawStatement, widthObj, { width: '180%' })).toBe('box width 180% height 75%');
+
+      // rad vs radius
+      const radObj = parseObjectsFromSource('circle rad 10px')[0];
+      expect(updateMultiLineStatement(radObj.rawStatement, radObj, { radius: '15px' })).toBe('circle rad 15px');
+
+      const radiusObj = parseObjectsFromSource('circle radius 10px')[0];
+      expect(updateMultiLineStatement(radiusObj.rawStatement, radiusObj, { radius: '15px' })).toBe('circle radius 15px');
+
+      // diam vs diameter
+      const diamObj = parseObjectsFromSource('circle diam 20px')[0];
+      expect(updateMultiLineStatement(diamObj.rawStatement, diamObj, { diameter: '25px' })).toBe('circle diam 25px');
+
+      const diameterObj = parseObjectsFromSource('circle diameter 20px')[0];
+      expect(updateMultiLineStatement(diameterObj.rawStatement, diameterObj, { diameter: '25px' })).toBe('circle diameter 25px');
+
+      // invis vs invisible
+      const invisObj = parseObjectsFromSource('line invis from A to B')[0];
+      expect(updateMultiLineStatement(invisObj.rawStatement, invisObj, { thickness: 'thick' })).toBe('line invis from A to B thick');
+
+      const invisibleObj = parseObjectsFromSource('line invisible from A to B')[0];
+      expect(updateMultiLineStatement(invisibleObj.rawStatement, invisibleObj, { thickness: 'thick' })).toBe('line invisible from A to B thick');
+    });
+
+    it('preserves separate text string literals when only text modifiers are updated', () => {
+      const code = 'box "Code" "Generator"';
+      const objs = parseObjectsFromSource(code);
+
+      const updated = updateMultiLineStatement(
+        objs[0].rawStatement,
+        objs[0],
+        { textStyle: 'italic' }
+      );
+
+      expect(updated).toBe('box "Code" "Generator" italic');
+    });
+
     it('synchronizes SVG data-obj-id with objects list for all behind boxes in SQLite Architecture', async () => {
       const code = EXAMPLES[0].code;
       const objs = parseObjectsFromSource(code);
@@ -386,7 +462,66 @@ box "C"`;
       expect(coreTextMatch.length).toBe(1);
       expect(coreTextMatch[0][1]).toBe(coreTextObj.id);
     });
+
+    it('does not render items count badge on the right side of STATEMENTS sidebar header', () => {
+      const code = 'box "A"\narrow\nbox "B"';
+      const objs = parseObjectsFromSource(code);
+
+      const html = renderToString(
+        React.createElement(I18nProvider, null,
+          React.createElement(ObjectListSidebar, {
+            objects: objs,
+            selectedLine: 1,
+            selectedObjectId: objs[0].id,
+            onSelectObject: () => {},
+            onUpdateObject: () => {},
+            onDeleteObject: () => {},
+          })
+        )
+      );
+
+      // Verify STATEMENTS title exists
+      expect(html).toContain('STATEMENTS');
+      // Verify right-side "items" / "개" badge is removed
+      expect(html).not.toMatch(/>\s*\d+\s*(?:items|개)\s*</i);
+    });
+
+    describe('Empty line block deselection logic (shouldDeselectOnEmptyLine)', () => {
+      it('returns true to deselect active block when moving to an empty line without backslash continuation', () => {
+        const lines = ['box "A"', ''];
+        // Cursor on line 2 (empty line), previous line has no '\'
+        expect(shouldDeselectOnEmptyLine(lines, 2)).toBe(true);
+      });
+
+      it('returns false when cursor is on an empty line whose previous line ends with continuation backslash', () => {
+        const lines = ['box ht 20 \\', ''];
+        // Cursor on line 2 (empty line), but previous line ends with '\'
+        expect(shouldDeselectOnEmptyLine(lines, 2)).toBe(false);
+      });
+
+      it('returns false when cursor is on a line with non-whitespace text', () => {
+        const lines = ['box "A"', 'arrow'];
+        expect(shouldDeselectOnEmptyLine(lines, 2)).toBe(false);
+        expect(shouldDeselectOnEmptyLine(lines, 1)).toBe(false);
+      });
+
+      it('returns true when the first line is empty', () => {
+        const lines = ['', 'box "A"'];
+        expect(shouldDeselectOnEmptyLine(lines, 1)).toBe(true);
+      });
+
+      it('correctly detects trailing comments vs actual backslashes', () => {
+        // Line with comment ending in backslash is NOT a continuation line
+        const linesWithComment = ['box "A" // some backslash \\', ''];
+        expect(shouldDeselectOnEmptyLine(linesWithComment, 2)).toBe(true);
+
+        // Line with backslash followed by comment IS a continuation line
+        const linesWithBackslashAndComment = ['box "A" \\ # continuing line', ''];
+        expect(shouldDeselectOnEmptyLine(linesWithBackslashAndComment, 2)).toBe(false);
+      });
+    });
   });
 });
+
 
 

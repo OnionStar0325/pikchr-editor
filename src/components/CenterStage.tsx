@@ -14,6 +14,12 @@ import { CompileResult, PikchrObject, ActiveTargetField } from '../lib/types';
 import { getObjectReference } from '../lib/pikchr';
 import { useTranslation } from '../lib/i18n';
 import { useTheme, CanvasBackground } from '../lib/theme';
+import {
+  calculateZoomTransform,
+  calculateFocalZoom,
+  MIN_SCALE,
+  MAX_SCALE,
+} from '../lib/zoomMath';
 
 interface CenterStageProps {
   compileResult: CompileResult;
@@ -44,6 +50,13 @@ export const CenterStage: React.FC<CenterStageProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [panMode, setPanMode] = useState(false);
+  const [isWheeling, setIsWheeling] = useState(false);
+  const wheelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scaleRef = useRef(scale);
+  scaleRef.current = scale;
+  const panRef = useRef(pan);
+  panRef.current = pan;
 
   // SVG 요소 선택 및 앵커 포인트 오버레이 인터랙션 관리
   useEffect(() => {
@@ -266,10 +279,71 @@ export const CenterStage: React.FC<CenterStageProps> = ({
     };
   }, [compileResult.svgHtml, objects, selectedLine, selectedObjectId, activeTargetField, onSelectLine, onSelectAnchor]);
 
-  const handleWheel = (e: React.WheelEvent) => {
+  const handleWheel = useCallback((e: React.WheelEvent | WheelEvent) => {
     e.preventDefault();
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    setScale(prev => Math.min(Math.max(prev * delta, 0.2), 4));
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+
+    const result = calculateZoomTransform({
+      currentScale: scaleRef.current,
+      currentPan: panRef.current,
+      deltaY: e.deltaY,
+      cursor: { x: e.clientX, y: e.clientY },
+      containerRect: rect,
+      isPinch: e.ctrlKey,
+      minScale: MIN_SCALE,
+      maxScale: MAX_SCALE,
+    });
+
+    scaleRef.current = result.newScale;
+    panRef.current = result.newPan;
+    setScale(result.newScale);
+    setPan(result.newPan);
+
+    setIsWheeling(true);
+    if (wheelTimeoutRef.current) {
+      clearTimeout(wheelTimeoutRef.current);
+    }
+    wheelTimeoutRef.current = setTimeout(() => {
+      setIsWheeling(false);
+    }, 120);
+  }, []);
+
+  // 브라우저 기본 제스처 방지 및 고빈도 휠/트랙패드 줌 인터랙션 연결
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onNativeWheel = (e: WheelEvent) => {
+      handleWheel(e);
+    };
+    el.addEventListener('wheel', onNativeWheel, { passive: false });
+    return () => {
+      el.removeEventListener('wheel', onNativeWheel);
+      if (wheelTimeoutRef.current) clearTimeout(wheelTimeoutRef.current);
+    };
+  }, [handleWheel]);
+
+  // 구글맵 더블클릭 줌: 더블클릭한 지점을 중심으로 1.5배 확대 (Shift+더블클릭은 축소)
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('button')) return;
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const multiplier = e.shiftKey ? 1 / 1.5 : 1.5;
+
+    const result = calculateFocalZoom({
+      currentScale: scaleRef.current,
+      currentPan: panRef.current,
+      multiplier,
+      cursor: { x: e.clientX, y: e.clientY },
+      containerRect: rect,
+      minScale: MIN_SCALE,
+      maxScale: MAX_SCALE,
+    });
+
+    scaleRef.current = result.newScale;
+    panRef.current = result.newPan;
+    setScale(result.newScale);
+    setPan(result.newPan);
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -281,10 +355,12 @@ export const CenterStage: React.FC<CenterStageProps> = ({
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (isDragging) {
-      setPan({
+      const nextPan = {
         x: e.clientX - dragStart.x,
         y: e.clientY - dragStart.y,
-      });
+      };
+      panRef.current = nextPan;
+      setPan(nextPan);
     }
   };
 
@@ -292,7 +368,55 @@ export const CenterStage: React.FC<CenterStageProps> = ({
     setIsDragging(false);
   };
 
+  const handleZoomIn = () => {
+    if (!containerRef.current) {
+      const nextScale = Math.min(scaleRef.current * 1.25, MAX_SCALE);
+      scaleRef.current = nextScale;
+      setScale(nextScale);
+      return;
+    }
+    const rect = containerRef.current.getBoundingClientRect();
+    const result = calculateFocalZoom({
+      currentScale: scaleRef.current,
+      currentPan: panRef.current,
+      multiplier: 1.25,
+      cursor: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+      containerRect: rect,
+      minScale: MIN_SCALE,
+      maxScale: MAX_SCALE,
+    });
+    scaleRef.current = result.newScale;
+    panRef.current = result.newPan;
+    setScale(result.newScale);
+    setPan(result.newPan);
+  };
+
+  const handleZoomOut = () => {
+    if (!containerRef.current) {
+      const nextScale = Math.max(scaleRef.current / 1.25, MIN_SCALE);
+      scaleRef.current = nextScale;
+      setScale(nextScale);
+      return;
+    }
+    const rect = containerRef.current.getBoundingClientRect();
+    const result = calculateFocalZoom({
+      currentScale: scaleRef.current,
+      currentPan: panRef.current,
+      multiplier: 1 / 1.25,
+      cursor: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+      containerRect: rect,
+      minScale: MIN_SCALE,
+      maxScale: MAX_SCALE,
+    });
+    scaleRef.current = result.newScale;
+    panRef.current = result.newPan;
+    setScale(result.newScale);
+    setPan(result.newPan);
+  };
+
   const handleResetView = () => {
+    scaleRef.current = 1;
+    panRef.current = { x: 0, y: 0 };
     setScale(1);
     setPan({ x: 0, y: 0 });
   };
@@ -314,6 +438,7 @@ export const CenterStage: React.FC<CenterStageProps> = ({
     <main
       ref={containerRef}
       onWheel={handleWheel}
+      onDoubleClick={handleDoubleClick}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
@@ -325,14 +450,14 @@ export const CenterStage: React.FC<CenterStageProps> = ({
       {/* Canvas Viewport Toolbar (Left) */}
       <div className="absolute top-4 left-4 z-20 flex items-center bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border border-slate-200 dark:border-slate-800 rounded-lg p-1 shadow-lg space-x-1 text-slate-700 dark:text-slate-300">
         <button
-          onClick={() => setScale(prev => Math.min(prev * 1.2, 4))}
+          onClick={handleZoomIn}
           title="Zoom In"
           className="p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition"
         >
           <ZoomIn className="w-4 h-4" />
         </button>
         <button
-          onClick={() => setScale(prev => Math.max(prev / 1.2, 0.2))}
+          onClick={handleZoomOut}
           title="Zoom Out"
           className="p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition"
         >
@@ -405,7 +530,7 @@ export const CenterStage: React.FC<CenterStageProps> = ({
         style={{
           transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
           transformOrigin: 'center center',
-          transition: isDragging ? 'none' : 'transform 0.1s ease-out',
+          transition: (isDragging || isWheeling) ? 'none' : 'transform 0.15s cubic-bezier(0.2, 0, 0, 1)',
         }}
         className="pikchr-interactive-canvas p-12 flex items-center justify-center shrink-0"
       >

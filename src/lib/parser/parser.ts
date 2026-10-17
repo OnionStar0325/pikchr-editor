@@ -404,8 +404,8 @@ export class Parser {
       const modifiers: string[] = [];
       while (
         this.checkAnyKeyword([
-          'big', 'small', 'bold', 'italic', 'mono',
-          'aligned', 'above', 'below', 'center', 'ljust', 'rjust'
+          'big', 'small', 'bold', 'italic', 'mono', 'monospace',
+          'aligned', 'above', 'below', 'center', 'centre', 'ljust', 'rjust'
         ])
       ) {
         modifiers.push(this.advance().value);
@@ -429,11 +429,14 @@ export class Parser {
       };
     }
 
-    // 3. Arc Directions: "cw", "ccw"
-    if (this.matchKeyword('cw') || this.matchKeyword('ccw')) {
+    // 3. Arc Directions: "cw", "ccw", "clockwise", "counterclockwise"
+    if (this.matchKeyword('cw') || this.matchKeyword('clockwise') || this.matchKeyword('ccw') || this.matchKeyword('counterclockwise')) {
+      const rawProperty = this.previous().value;
+      const property = (rawProperty.startsWith('clock') ? 'cw' : rawProperty.startsWith('counter') ? 'ccw' : rawProperty) as 'cw' | 'ccw';
       return {
         type: 'ArcAttribute',
-        property: this.previous().value as 'cw' | 'ccw',
+        property,
+        rawProperty,
         loc: { start: startLoc, end: this.getPos() },
       };
     }
@@ -505,14 +508,15 @@ export class Parser {
       };
     }
 
-    if (this.matchKeyword('thin') || this.matchKeyword('thick') || this.matchKeyword('invis')) {
-      const property = this.previous().value as 'thin' | 'thick' | 'invis';
+    if (this.matchKeyword('thin') || this.matchKeyword('thick') || this.matchKeyword('invis') || this.matchKeyword('invisible')) {
+      const rawProperty = this.previous().value;
+      const property = (rawProperty === 'invisible' ? 'invis' : rawProperty) as 'thin' | 'thick' | 'invis';
       if (property === 'thick' && this.isDistanceStart() && !this.checkTerminator() && !this.isAttributeStart()) {
         const value = this.parseExpression();
         return {
           type: 'DimensionAttribute',
           name: 'thickness',
-          rawName: 'thick',
+          rawName: rawProperty,
           value,
           loc: { start: startLoc, end: this.getPos() },
         };
@@ -520,6 +524,7 @@ export class Parser {
       return {
         type: 'StyleAttribute',
         property,
+        rawProperty,
         loc: { start: startLoc, end: this.getPos() },
       };
     }

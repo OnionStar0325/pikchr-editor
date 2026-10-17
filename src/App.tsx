@@ -772,15 +772,20 @@ export const App: React.FC = () => {
           updatedStatement += ` ${mergedProps.textPosition}`;
         }
       }
-      if (mergedProps.width) updatedStatement += ` width ${mergedProps.width}`;
-      if (mergedProps.height) updatedStatement += ` height ${mergedProps.height}`;
-      if (mergedProps.radius) updatedStatement += ` rad ${mergedProps.radius}`;
+      const rawStmt = latestObj.rawStatement || '';
+      const widKw = /\bwidth\b/i.test(rawStmt) ? 'width' : 'wid';
+      const htKw = /\bheight\b/i.test(rawStmt) ? 'height' : 'ht';
+      const radKw = /\bradius\b/i.test(rawStmt) ? 'radius' : 'rad';
+      const invisKw = /\binvisible\b/i.test(rawStmt) ? 'invisible' : 'invis';
+      if (mergedProps.width) updatedStatement += ` ${widKw} ${mergedProps.width}`;
+      if (mergedProps.height) updatedStatement += ` ${htKw} ${mergedProps.height}`;
+      if (mergedProps.radius) updatedStatement += ` ${radKw} ${mergedProps.radius}`;
       if (mergedProps.fill) updatedStatement += ` fill ${mergedProps.fill}`;
       if (mergedProps.color) updatedStatement += ` color ${mergedProps.color}`;
       if (mergedProps.fit) updatedStatement += ` fit`;
       if (mergedProps.thickness) updatedStatement += ` ${mergedProps.thickness}`;
       if (mergedProps.dash) updatedStatement += ` ${mergedProps.dash}`;
-      if (mergedProps.invis) updatedStatement += ` invis`;
+      if (mergedProps.invis) updatedStatement += ` ${invisKw}`;
     }
 
     const formatMultiLineStatement = (rawStmt: string, singleLine: string): string => {
@@ -845,7 +850,8 @@ export const App: React.FC = () => {
     let finalStatement = updatedStatement;
 
     // 다구간 선분(Multi-segment connector)인 경우 각 then 세그먼트를 '\' 개행으로 포맷
-    if (isConnectorType && activeSegments && activeSegments.length > 1) {
+    const isPathModified = newProps.pathSegments !== undefined || newProps.path !== undefined;
+    if (isConnectorType && isPathModified && activeSegments && activeSegments.length > 1) {
       let header = `${type}`;
       if (mergedProps.extraModifiers) {
         header += ` ${mergedProps.extraModifiers}`;
@@ -923,7 +929,7 @@ export const App: React.FC = () => {
         }
       }
       finalStatement = multiLines.join('\n');
-    } else if (latestObj.rawStatement && latestObj.rawStatement.includes('\n')) {
+    } else if (latestObj.rawStatement) {
       finalStatement = updateMultiLineStatement(
         latestObj.rawStatement,
         latestObj,

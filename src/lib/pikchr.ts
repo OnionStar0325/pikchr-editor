@@ -1019,8 +1019,46 @@ export function extractConnectorPath(rawStmt: string, objType: string): string {
 }
 
 /**
- * 멀티라인 Pikchr 문장에서 특정 프로퍼티 수정/삭제/추가 시 기존의 줄 구조(들여쓰기, 백슬래시 연결)를 유지하며 갱신
- * 만약 한 개 행을 차지하던 속성이 모두 삭제되는 경우 해당 행을 삭제함.
+ * 따옴표 바깥의 연속된 공백만 1개의 공백으로 정리하고 따옴표 내부의 공백은 절대 변경하지 않습니다.
+ */
+export function collapseWhitespaceOutsideQuotes(text: string): string {
+  let res = '';
+  let inString = false;
+  let inSpaces = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      res += ch;
+      if (ch === '\\' && i + 1 < text.length) {
+        res += text[++i];
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      inSpaces = false;
+      res += ch;
+      continue;
+    }
+    if (ch === ' ' || ch === '\t') {
+      if (!inSpaces) {
+        res += ' ';
+        inSpaces = true;
+      }
+    } else {
+      inSpaces = false;
+      res += ch;
+    }
+  }
+  return res;
+}
+
+/**
+ * Pikchr 문장에서 특정 프로퍼티 수정/삭제/추가 시 기존의 줄 구조(단일행, 멀티라인, 들여쓰기, 백슬래시 연결)를 유지하며
+ * 기존 코드의 토큰 순서, 여러 개의 텍스트 문자열, 동의어 키워드(wid/width, ht/height, rad/radius, diam/diameter, invis/invisible 등)를 오염시키지 않고 갱신합니다.
+ * 멀티라인에서 한 개 행을 차지하던 속성이 모두 삭제되는 경우 해당 행을 삭제함.
  */
 export function updateMultiLineStatement(
   rawStatement: string,
@@ -1029,7 +1067,7 @@ export function updateMultiLineStatement(
   newLabel?: string,
   newLabelName?: string
 ): string {
-  if (!rawStatement || !rawStatement.includes('\n')) {
+  if (!rawStatement) {
     return rawStatement;
   }
 
@@ -1090,27 +1128,54 @@ export function updateMultiLineStatement(
   const attrs = (stmt as any).attributes || [];
 
   // 2. TextAttribute
-  const textAttr = attrs.find((a: any) => a.type === 'TextAttribute');
+  const textAttrs = attrs.filter((a: any) => a.type === 'TextAttribute');
   const isTextModified =
     newLabel !== undefined ||
-    newProps.textStyle !== undefined ||
-    newProps.textSize !== undefined ||
-    newProps.textAlign !== undefined ||
-    newProps.textPosition !== undefined;
+    'textStyle' in newProps ||
+    'textSize' in newProps ||
+    'textAlign' in newProps ||
+    'textPosition' in newProps;
 
   if (isTextModified) {
-    const activeLabel = newLabel !== undefined ? newLabel : (targetObj.label || '');
-    if (textAttr) {
-      handledKeys.add('label');
-      const range = getAttrContentRange(textAttr.loc);
-      if (!activeLabel.trim()) {
+    if (newLabel !== undefined) {
+      const activeLabel = newLabel.trim();
+      let textStr = '';
+      if (activeLabel) {
+        textStr = `"${activeLabel}"`;
+        const ts = newProps.textSize !== undefined ? newProps.textSize : targetObj.properties.textSize;
+        if (ts && ts !== 'normal') textStr += ` ${ts}`;
+        const st = newProps.textStyle !== undefined ? newProps.textStyle : targetObj.properties.textStyle;
+        if (st) textStr += ` ${st}`;
+        const ta = newProps.textAlign !== undefined ? newProps.textAlign : targetObj.properties.textAlign;
+        if (ta && ta !== 'center') textStr += ` ${ta}`;
+        const tp = newProps.textPosition !== undefined ? newProps.textPosition : targetObj.properties.textPosition;
+        if (tp && tp !== 'center') textStr += ` ${tp}`;
+      }
+
+      if (textAttrs.length > 0) {
+        handledKeys.add('label');
+        const firstLoc = textAttrs[0].loc;
+        const lastLoc = textAttrs[textAttrs.length - 1].loc;
+        const range = getAttrContentRange({ start: firstLoc.start, end: lastLoc.end });
         replacements.push({
           startOffset: range.startOffset,
           endOffset: range.endOffset,
-          newText: '',
+          newText: textStr,
         });
-      } else {
-        let textStr = `"${activeLabel.trim()}"`;
+      } else if (textStr) {
+        addedTexts.push(textStr);
+      }
+    } else {
+      // 라벨 텍스트 자체는 변경하지 않고 텍스트 스타일/크기/위치 모디파이어만 변경 시 기존 따옴표 문자열들 보존
+      if (textAttrs.length > 0) {
+        handledKeys.add('label');
+        const origStrings = textAttrs.map((ta: any) => {
+          const slice = rawStatement.substring(ta.loc.start.offset, ta.loc.end.offset);
+          const m = slice.match(/^"([^"\\]*(?:\\.[^"\\]*)*)"/);
+          return m ? m[0] : `"${ta.text}"`;
+        }).join(' ');
+
+        let textStr = origStrings;
         const ts = newProps.textSize !== undefined ? newProps.textSize : targetObj.properties.textSize;
         if (ts && ts !== 'normal') textStr += ` ${ts}`;
         const st = newProps.textStyle !== undefined ? newProps.textStyle : targetObj.properties.textStyle;
@@ -1120,23 +1185,15 @@ export function updateMultiLineStatement(
         const tp = newProps.textPosition !== undefined ? newProps.textPosition : targetObj.properties.textPosition;
         if (tp && tp !== 'center') textStr += ` ${tp}`;
 
+        const firstLoc = textAttrs[0].loc;
+        const lastLoc = textAttrs[textAttrs.length - 1].loc;
+        const range = getAttrContentRange({ start: firstLoc.start, end: lastLoc.end });
         replacements.push({
           startOffset: range.startOffset,
           endOffset: range.endOffset,
           newText: textStr,
         });
       }
-    } else if (activeLabel.trim()) {
-      let textStr = `"${activeLabel.trim()}"`;
-      const ts = newProps.textSize !== undefined ? newProps.textSize : targetObj.properties.textSize;
-      if (ts && ts !== 'normal') textStr += ` ${ts}`;
-      const st = newProps.textStyle !== undefined ? newProps.textStyle : targetObj.properties.textStyle;
-      if (st) textStr += ` ${st}`;
-      const ta = newProps.textAlign !== undefined ? newProps.textAlign : targetObj.properties.textAlign;
-      if (ta && ta !== 'center') textStr += ` ${ta}`;
-      const tp = newProps.textPosition !== undefined ? newProps.textPosition : targetObj.properties.textPosition;
-      if (tp && tp !== 'center') textStr += ` ${tp}`;
-      addedTexts.push(textStr);
     }
   }
 
@@ -1144,70 +1201,74 @@ export function updateMultiLineStatement(
   const dimAttrs = attrs.filter((a: any) => a.type === 'DimensionAttribute');
 
   // width
-  if (newProps.width !== undefined) {
+  if ('width' in newProps) {
     const attr = dimAttrs.find((a: any) => a.name === 'width');
     if (attr) {
       handledKeys.add('width');
-      const val = newProps.width.trim();
+      const val = newProps.width?.trim();
       const range = getAttrContentRange(attr.loc);
       replacements.push({
         startOffset: range.startOffset,
         endOffset: range.endOffset,
-        newText: val ? `${attr.rawName || 'width'} ${val}` : '',
+        newText: val ? `${attr.rawName || 'wid'} ${val}` : '',
       });
-    } else if (newProps.width.trim()) {
-      addedTexts.push(`width ${newProps.width.trim()}`);
+    } else if (newProps.width?.trim()) {
+      const defaultWid = /\bwidth\b/i.test(rawStatement) ? 'width' : 'wid';
+      addedTexts.push(`${defaultWid} ${newProps.width.trim()}`);
     }
   }
 
   // height
-  if (newProps.height !== undefined) {
+  if ('height' in newProps) {
     const attr = dimAttrs.find((a: any) => a.name === 'height');
     if (attr) {
       handledKeys.add('height');
-      const val = newProps.height.trim();
+      const val = newProps.height?.trim();
       const range = getAttrContentRange(attr.loc);
       replacements.push({
         startOffset: range.startOffset,
         endOffset: range.endOffset,
-        newText: val ? `${attr.rawName || 'height'} ${val}` : '',
+        newText: val ? `${attr.rawName || 'ht'} ${val}` : '',
       });
-    } else if (newProps.height.trim()) {
-      addedTexts.push(`height ${newProps.height.trim()}`);
+    } else if (newProps.height?.trim()) {
+      const defaultHt = /\bheight\b/i.test(rawStatement) ? 'height' : 'ht';
+      addedTexts.push(`${defaultHt} ${newProps.height.trim()}`);
     }
   }
 
   // radius
-  if (newProps.radius !== undefined) {
+  if ('radius' in newProps) {
     const attr = dimAttrs.find((a: any) => a.name === 'radius');
     if (attr) {
       handledKeys.add('radius');
-      const val = newProps.radius.trim();
+      const val = newProps.radius?.trim();
       const range = getAttrContentRange(attr.loc);
       replacements.push({
         startOffset: range.startOffset,
         endOffset: range.endOffset,
         newText: val ? `${attr.rawName || 'rad'} ${val}` : '',
       });
-    } else if (newProps.radius.trim()) {
-      addedTexts.push(`rad ${newProps.radius.trim()}`);
+    } else if (newProps.radius?.trim()) {
+      const defaultRad = /\bradius\b/i.test(rawStatement) ? 'radius' : 'rad';
+      addedTexts.push(`${defaultRad} ${newProps.radius.trim()}`);
     }
   }
 
   // diameter
-  if (newProps.diameter !== undefined) {
+  if ('diameter' in newProps) {
     const attr = dimAttrs.find((a: any) => a.name === 'diameter');
     if (attr) {
       handledKeys.add('diameter');
-      const val = newProps.diameter.trim();
+      const val = newProps.diameter?.trim();
       const range = getAttrContentRange(attr.loc);
       replacements.push({
         startOffset: range.startOffset,
         endOffset: range.endOffset,
         newText: val ? `${attr.rawName || 'diam'} ${val}` : '',
       });
-    } else if (newProps.diameter.trim()) {
-      addedTexts.push(`diam ${newProps.diameter.trim()}`);
+    } else if (newProps.diameter?.trim()) {
+      const defaultDiam = /\bdiameter\b/i.test(rawStatement) ? 'diameter' : 'diam';
+      addedTexts.push(`${defaultDiam} ${newProps.diameter.trim()}`);
     }
   }
 
@@ -1215,7 +1276,7 @@ export function updateMultiLineStatement(
   const styleAttrs = attrs.filter((a: any) => a.type === 'StyleAttribute');
 
   // thickness (StyleAttribute thick/thin 또는 DimensionAttribute thickness)
-  if (newProps.thickness !== undefined) {
+  if ('thickness' in newProps) {
     const sAttr = styleAttrs.find((a: any) => a.property === 'thick' || a.property === 'thin');
     const dAttr = dimAttrs.find((a: any) => a.name === 'thickness');
     const attr = sAttr || dAttr;
@@ -1224,10 +1285,11 @@ export function updateMultiLineStatement(
       const val = newProps.thickness;
       const isThick = val === 'thick' || val === 'thin';
       const range = getAttrContentRange(attr.loc);
+      const rawWord = attr.rawName || (attr as any).rawProperty || val;
       replacements.push({
         startOffset: range.startOffset,
         endOffset: range.endOffset,
-        newText: isThick ? val! : '',
+        newText: isThick ? rawWord : '',
       });
     } else if (newProps.thickness === 'thick' || newProps.thickness === 'thin') {
       addedTexts.push(newProps.thickness);
@@ -1235,41 +1297,41 @@ export function updateMultiLineStatement(
   }
 
   // fill
-  if (newProps.fill !== undefined) {
+  if ('fill' in newProps) {
     const attr = styleAttrs.find((a: any) => a.property === 'fill');
     if (attr) {
       handledKeys.add('fill');
-      const val = newProps.fill.trim();
+      const val = newProps.fill?.trim();
       const range = getAttrContentRange(attr.loc);
       replacements.push({
         startOffset: range.startOffset,
         endOffset: range.endOffset,
         newText: val ? `fill ${val}` : '',
       });
-    } else if (newProps.fill.trim()) {
+    } else if (newProps.fill?.trim()) {
       addedTexts.push(`fill ${newProps.fill.trim()}`);
     }
   }
 
   // color
-  if (newProps.color !== undefined) {
+  if ('color' in newProps) {
     const attr = styleAttrs.find((a: any) => a.property === 'color');
     if (attr) {
       handledKeys.add('color');
-      const val = newProps.color.trim();
+      const val = newProps.color?.trim();
       const range = getAttrContentRange(attr.loc);
       replacements.push({
         startOffset: range.startOffset,
         endOffset: range.endOffset,
         newText: val ? `color ${val}` : '',
       });
-    } else if (newProps.color.trim()) {
+    } else if (newProps.color?.trim()) {
       addedTexts.push(`color ${newProps.color.trim()}`);
     }
   }
 
   // dash
-  if (newProps.dash !== undefined) {
+  if ('dash' in newProps) {
     const attr = styleAttrs.find((a: any) => a.property === 'dashed' || a.property === 'dotted');
     if (attr) {
       handledKeys.add('dash');
@@ -1287,23 +1349,25 @@ export function updateMultiLineStatement(
   }
 
   // invis
-  if (newProps.invis !== undefined) {
+  if ('invis' in newProps) {
     const attr = styleAttrs.find((a: any) => a.property === 'invis');
     if (attr) {
       handledKeys.add('invis');
       const range = getAttrContentRange(attr.loc);
+      const rawWord = (attr as any).rawProperty || (/\binvisible\b/i.test(rawStatement) ? 'invisible' : 'invis');
       replacements.push({
         startOffset: range.startOffset,
         endOffset: range.endOffset,
-        newText: newProps.invis ? 'invis' : '',
+        newText: newProps.invis ? rawWord : '',
       });
     } else if (newProps.invis) {
-      addedTexts.push('invis');
+      const defaultInvis = /\binvisible\b/i.test(rawStatement) ? 'invisible' : 'invis';
+      addedTexts.push(defaultInvis);
     }
   }
 
   // 5. FitAttribute
-  if (newProps.fit !== undefined) {
+  if ('fit' in newProps) {
     const attr = attrs.find((a: any) => a.type === 'FitAttribute');
     if (attr) {
       handledKeys.add('fit');
@@ -1322,7 +1386,7 @@ export function updateMultiLineStatement(
   const posAttrs = attrs.filter((a: any) => a.type === 'PositionAttribute');
 
   // chop
-  if (newProps.chop !== undefined) {
+  if ('chop' in newProps) {
     const attr = posAttrs.find((a: any) => a.kind === 'chop');
     if (attr) {
       handledKeys.add('chop');
@@ -1338,72 +1402,131 @@ export function updateMultiLineStatement(
   }
 
   // from
-  if (newProps.from !== undefined) {
+  if ('from' in newProps) {
     const attr = posAttrs.find((a: any) => a.kind === 'from');
     if (attr) {
       handledKeys.add('from');
-      const val = newProps.from.trim();
+      const val = newProps.from?.trim();
       const range = getAttrContentRange(attr.loc);
       replacements.push({
         startOffset: range.startOffset,
         endOffset: range.endOffset,
         newText: val ? `from ${val}` : '',
       });
-    } else if (newProps.from.trim()) {
+    } else if (newProps.from?.trim()) {
       addedTexts.push(`from ${newProps.from.trim()}`);
     }
   }
 
   // to
-  if (newProps.to !== undefined) {
+  if ('to' in newProps) {
     const attr = posAttrs.find((a: any) => a.kind === 'to');
     if (attr) {
       handledKeys.add('to');
-      const val = newProps.to.trim();
+      const val = newProps.to?.trim();
       const range = getAttrContentRange(attr.loc);
       replacements.push({
         startOffset: range.startOffset,
         endOffset: range.endOffset,
         newText: val ? `to ${val}` : '',
       });
-    } else if (newProps.to.trim()) {
+    } else if (newProps.to?.trim()) {
       addedTexts.push(`to ${newProps.to.trim()}`);
     }
   }
 
   // until
-  if (newProps.until !== undefined) {
+  if ('until' in newProps) {
     const attr = posAttrs.find((a: any) => a.kind === 'until_even_with');
     if (attr) {
       handledKeys.add('until');
-      const val = newProps.until.trim();
-      const stripped = val.replace(/^until\s+(?:even\s+with\s+)?/i, '').trim();
+      const val = newProps.until?.trim();
+      const stripped = val ? val.replace(/^until\s+(?:even\s+with\s+)?/i, '').trim() : '';
       const range = getAttrContentRange(attr.loc);
       replacements.push({
         startOffset: range.startOffset,
         endOffset: range.endOffset,
         newText: stripped ? `until even with ${stripped}` : '',
       });
-    } else if (newProps.until.trim()) {
+    } else if (newProps.until?.trim()) {
       const stripped = newProps.until.trim().replace(/^until\s+(?:even\s+with\s+)?/i, '').trim();
       addedTexts.push(`until even with ${stripped}`);
     }
   }
 
-  // at
-  if (newProps.at !== undefined) {
+  // at / with
+  if ('at' in newProps) {
     const attr = posAttrs.find((a: any) => a.kind === 'at' || a.kind === 'with_at');
     if (attr) {
       handledKeys.add('at');
+      const val = newProps.at?.trim();
+      const range = getAttrContentRange(attr.loc);
+      let replacement = '';
+      if (val) {
+        if (attr.kind === 'with_at' && attr.anchor) {
+          replacement = `with ${attr.anchor} at ${val}`;
+        } else {
+          replacement = `at ${val}`;
+        }
+      }
+      replacements.push({
+        startOffset: range.startOffset,
+        endOffset: range.endOffset,
+        newText: replacement,
+      });
+    } else if (newProps.at?.trim()) {
       const val = newProps.at.trim();
+      if (newProps.with?.trim()) {
+        addedTexts.push(`with ${newProps.with.trim()} at ${val}`);
+      } else {
+        addedTexts.push(`at ${val}`);
+      }
+    }
+  }
+
+  // arcDir (cw / ccw / clockwise / counterclockwise)
+  if ('arcDir' in newProps) {
+    const arcAttrs = attrs.filter((a: any) => a.type === 'ArcAttribute');
+    const attr = arcAttrs.find((a: any) => a.property === 'cw' || a.property === 'ccw');
+    if (attr) {
+      handledKeys.add('arcDir');
+      const val = newProps.arcDir;
+      const isDir = val === 'cw' || val === 'ccw';
+      const range = getAttrContentRange(attr.loc);
+      let newWord = '';
+      if (isDir) {
+        if (attr.rawProperty && (attr.rawProperty.startsWith('clock') || attr.rawProperty.startsWith('counter'))) {
+          newWord = val === 'cw' ? 'clockwise' : 'counterclockwise';
+        } else {
+          newWord = val;
+        }
+      }
+      replacements.push({
+        startOffset: range.startOffset,
+        endOffset: range.endOffset,
+        newText: newWord,
+      });
+    } else if (newProps.arcDir) {
+      addedTexts.push(newProps.arcDir);
+    }
+  }
+
+  // arrowHead (-> / <- / <->)
+  if ('arrowHead' in newProps) {
+    const arcAttrs = attrs.filter((a: any) => a.type === 'ArcAttribute');
+    const attr = arcAttrs.find((a: any) => a.property === 'arrow_head');
+    if (attr) {
+      handledKeys.add('arrowHead');
+      const val = newProps.arrowHead;
+      const isArrow = val === '->' || val === '<-' || val === '<->';
       const range = getAttrContentRange(attr.loc);
       replacements.push({
         startOffset: range.startOffset,
         endOffset: range.endOffset,
-        newText: val ? `at ${val}` : '',
+        newText: isArrow ? val : '',
       });
-    } else if (newProps.at.trim()) {
-      addedTexts.push(`at ${newProps.at.trim()}`);
+    } else if (newProps.arrowHead && newProps.arrowHead !== 'none') {
+      addedTexts.push(newProps.arrowHead);
     }
   }
 
@@ -1442,7 +1565,7 @@ export function updateMultiLineStatement(
     // 0번째 행은 라벨 식별자나 shape 타입(box, line 등)이 있으므로 항상 보존
     if (i === 0) {
       const origIndent = originalRawLines[0].match(/^(\s*)/)?.[1] || '';
-      const cleaned = content.replace(/[ \t]+/g, ' ');
+      const cleaned = collapseWhitespaceOutsideQuotes(content);
       survivingLines.push(origIndent + cleaned);
       continue;
     }
@@ -1454,7 +1577,7 @@ export function updateMultiLineStatement(
 
     // 살아남은 행: 원래 행의 앞쪽 들여쓰기 유지 및 내용 공백 정돈
     const origIndent = (originalRawLines[i] && originalRawLines[i].match(/^(\s*)/)?.[1]) ?? (line.match(/^(\s*)/)?.[1] || '    ');
-    const cleanedContent = content.replace(/[ \t]+/g, ' ');
+    const cleanedContent = collapseWhitespaceOutsideQuotes(content);
     survivingLines.push(origIndent + cleanedContent);
   }
 

@@ -91,15 +91,15 @@ export const ALL_KEYWORDS = new Set([
   'diameter', 'diam',
   'thickness', 'thick',
   // Styles
-  'fill', 'color', 'dashed', 'dotted', 'thin', 'invis', 'behind',
+  'fill', 'color', 'dashed', 'dotted', 'thin', 'invis', 'invisible', 'behind',
   // Positions & Paths
   'at', 'from', 'to', 'with', 'go', 'chop', 'then', 'until', 'even', 'between', 'and', 'of', 'way',
   // Flags & Modifiers
-  'same', 'as', 'fit', 'cw', 'ccw',
+  'same', 'as', 'fit', 'cw', 'clockwise', 'ccw', 'counterclockwise',
   // Text Modifiers
-  'big', 'small', 'bold', 'italic', 'mono', 'aligned', 'above', 'below', 'center', 'ljust', 'rjust',
+  'big', 'small', 'bold', 'italic', 'mono', 'monospace', 'aligned', 'above', 'below', 'center', 'centre', 'ljust', 'rjust',
   // Anchors / Targets
-  'first', 'last', 'previous', 'start', 'end', 'vertex', 'top', 'bottom', 'bot',
+  'first', 'last', 'previous', 'prev', 'start', 'end', 'vertex', 'top', 'bottom', 'bot',
   // Control
   'define', 'print', 'assert',
 ]);

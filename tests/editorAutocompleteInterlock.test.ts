@@ -256,4 +256,41 @@ describe('Code Editor Autocomplete Debounce and Interlock', () => {
       expect(onOpen).not.toHaveBeenCalled();
     });
   });
+
+  describe('Platform-specific Manual Trigger Shortcuts (isAutocompleteManualTrigger)', () => {
+    it('triggers only on Shift+Cmd+Space for macOS', async () => {
+      const { isAutocompleteManualTrigger } = await import('../src/components/CodeEditorPanel');
+
+      // Mac: Shift + Cmd + Space -> true
+      expect(isAutocompleteManualTrigger({ metaKey: true, shiftKey: true, code: 'Space' }, true)).toBe(true);
+      expect(isAutocompleteManualTrigger({ metaKey: true, shiftKey: true, key: ' ' }, true)).toBe(true);
+
+      // Mac: Cmd + Space without Shift -> false
+      expect(isAutocompleteManualTrigger({ metaKey: true, shiftKey: false, code: 'Space' }, true)).toBe(false);
+
+      // Mac: Ctrl + Space -> false
+      expect(isAutocompleteManualTrigger({ ctrlKey: true, shiftKey: false, code: 'Space' }, true)).toBe(false);
+
+      // Mac: Shift + Space -> false
+      expect(isAutocompleteManualTrigger({ shiftKey: true, code: 'Space' }, true)).toBe(false);
+    });
+
+    it('triggers on Ctrl+Space for Windows/Linux non-Mac platforms', async () => {
+      const { isAutocompleteManualTrigger } = await import('../src/components/CodeEditorPanel');
+
+      // Non-Mac: Ctrl + Space -> true
+      expect(isAutocompleteManualTrigger({ ctrlKey: true, shiftKey: false, code: 'Space' }, false)).toBe(true);
+      expect(isAutocompleteManualTrigger({ ctrlKey: true, shiftKey: false, key: ' ' }, false)).toBe(true);
+
+      // Non-Mac: Shift + Cmd + Space -> false
+      expect(isAutocompleteManualTrigger({ metaKey: true, shiftKey: true, code: 'Space' }, false)).toBe(false);
+
+      // Non-Mac: Ctrl + Shift + Space -> false
+      expect(isAutocompleteManualTrigger({ ctrlKey: true, shiftKey: true, code: 'Space' }, false)).toBe(false);
+
+      // Non-Mac: plain Space -> false
+      expect(isAutocompleteManualTrigger({ code: 'Space' }, false)).toBe(false);
+    });
+  });
 });
+

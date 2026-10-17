@@ -14,9 +14,54 @@ import { analyzeAutocompleteContext } from '../lib/autocomplete/contextAnalyzer'
 import { getCompletions } from '../lib/autocomplete/completionEngine';
 import { getCaretCoordinates } from '../lib/autocomplete/caretPosition';
 import { CompletionItem, AutocompleteState } from '../lib/autocomplete/types';
-import { isStatementCompleted } from '../lib/statementDetector';
+import { isStatementCompleted, isContinuationLine } from '../lib/statementDetector';
 
 export const AUTOCOMPLETE_DEBOUNCE_MS = 500;
+
+export function isMacPlatform(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /Mac|iPod|iPhone|iPad/i.test(navigator.platform || '') ||
+         /Macintosh|Mac OS X/i.test(navigator.userAgent || '');
+}
+
+export function isAutocompleteManualTrigger(
+  e: {
+    ctrlKey?: boolean;
+    metaKey?: boolean;
+    shiftKey?: boolean;
+    code?: string;
+    key?: string;
+  },
+  isMac = isMacPlatform()
+): boolean {
+  const isSpace = e.code === 'Space' || e.key === ' ';
+  if (!isSpace) return false;
+
+  if (isMac) {
+    // 맥의 경우: Shift + Cmd + Space
+    return !!e.metaKey && !!e.shiftKey;
+  }
+  // 윈도우/리눅스 등 기타 OS: Ctrl + Space (또는 Cmd 없는 Ctrl+Space)
+  return !!e.ctrlKey && !e.shiftKey;
+}
+
+/**
+ * 개행 연결자 '\' 없이 빈 라인으로 이동했는지 여부를 판별하여
+ * 활성화 블럭을 해제해야 하는지 반환합니다.
+ */
+export function shouldDeselectOnEmptyLine(
+  lines: string[],
+  cursorLine: number
+): boolean {
+  const currentLineText = lines[cursorLine - 1] ?? '';
+  if (currentLineText.trim() === '') {
+    const prevLineText = cursorLine > 1 ? (lines[cursorLine - 2] ?? '') : '';
+    if (!isContinuationLine(prevLineText)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export const CURSOR_MOVE_KEYS = [
   'ArrowUp',
@@ -315,6 +360,14 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
         break;
       }
       runningOffset = nextOffset;
+    }
+
+    // 개행 연결자 '\' 없이 빈 라인으로 이동했다면 활성화 블럭 해제
+    if (shouldDeselectOnEmptyLine(lines, cursorLine)) {
+      if (selectedLine !== null || selectedObjectId !== null) {
+        onSelectLine(null, undefined);
+      }
+      return;
     }
 
     // 1. 오브젝트 및 정의 목록을 startChar 기준으로 정렬하여 탐색
@@ -762,6 +815,13 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
               scrollToFocusPosition(e.target, cursor);
               handleKeyInputScroll(e.target);
 
+              // 개행 연결자 '\' 없이 엔터를 눌러 빈 라인으로 이동했다면 활성화 블럭 해제
+              const textBeforeCursor = val.substring(0, cursor);
+              const curLines = textBeforeCursor.split('\n');
+              if (shouldDeselectOnEmptyLine(curLines, curLines.length)) {
+                onSelectLine(null, undefined);
+              }
+
               // 키 입력 시 팝업 닫고, 키 입력 멈춘 후 0.5초 경과 후 보여지도록 타이머 설정
               autocompleteManager.handleKeyInput(val, cursor);
             }}
@@ -780,7 +840,7 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
               if (autocomplete.isOpen && ['ArrowUp', 'ArrowDown', 'Enter', 'Tab', 'Escape', 'PageUp', 'PageDown'].includes(e.key)) {
                 return;
               }
-              if (CURSOR_MOVE_KEYS.includes(e.key)) {
+              if (CURSOR_MOVE_KEYS.includes(e.key) || e.key === 'Enter') {
                 handleCursorSync(e);
                 // 커서 위치 변경 키는 팝업을 보이지 않도록 인터락: 팝업 닫기 및 타이머 취소
                 autocompleteManager.handleCursorMoveKey(e.key);
@@ -790,8 +850,8 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
               isInternalEditorChangeRef.current = true;
               handleKeyInputScroll(e.currentTarget);
 
-              // 수동 호출 단축키: Ctrl+Space 또는 Cmd+Space (0.5초 대기 없이 즉시 호출)
-              if ((e.ctrlKey || e.metaKey) && (e.code === 'Space' || e.key === ' ')) {
+              // 수동 호출 단축키: 맥의 경우 Shift+Cmd+Space, 기타 OS는 Ctrl+Space (0.5초 대기 없이 즉시 호출)
+              if (isAutocompleteManualTrigger(e)) {
                 autocompleteManager.cancelTimer();
                 if (!isAutocompleteEnabled) return;
                 e.preventDefault();
