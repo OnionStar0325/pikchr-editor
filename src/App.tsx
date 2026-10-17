@@ -8,7 +8,7 @@ import { CenterStage } from './components/CenterStage';
 import { ObjectListSidebar } from './components/ObjectListSidebar';
 import { CodeEditorPanel } from './components/CodeEditorPanel';
 import { HelpModal } from './components/HelpModal';
-import { compilePikchr, parseObjectsFromSource, parseDefinitionsFromSource, splitStatements, buildPathString, parsePathIntoSegments, extractConnectorPath } from './lib/pikchr';
+import { compilePikchr, parseObjectsFromSource, parseDefinitionsFromSource, splitStatements, buildPathString, parsePathIntoSegments, extractConnectorPath, updateMultiLineStatement } from './lib/pikchr';
 import { CompileResult, PikchrObject, PikchrDefinition, ActiveTargetField, PikchrObjectProperties, PathSegment } from './lib/types';
 import { EXAMPLES } from './lib/examples';
 
@@ -59,6 +59,10 @@ export const App: React.FC = () => {
   const [definitions, setDefinitions] = useState<PikchrDefinition[]>([]);
   const [selectedLine, setSelectedLine] = useState<number | null>(null);
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+  const objectsRef = useRef(objects);
+  objectsRef.current = objects;
+  const selectedObjectIdRef = useRef(selectedObjectId);
+  selectedObjectIdRef.current = selectedObjectId;
   const [isCopied, setIsCopied] = useState(false);
   const [isEditorVisible, setIsEditorVisible] = useState(true);
   const [isEditorExpanded, setIsEditorExpanded] = useState(false);
@@ -162,6 +166,38 @@ export const App: React.FC = () => {
       const parsedDefs = parseDefinitionsFromSource(currentCode);
       setObjects(parsedObjs);
       setDefinitions(parsedDefs);
+
+      // 코드 중간에 statement가 추가/삭제되어 lineNumber나 id가 변동되어도 선택 상태 보존
+      if (selectedObjectIdRef.current) {
+        const prevId = selectedObjectIdRef.current;
+        const exactStillExists = parsedObjs.find(o => o.id === prevId);
+        if (!exactStillExists) {
+          const prevObj = objectsRef.current.find(o => o.id === prevId);
+          if (prevObj) {
+            let matchedObj = prevObj.labelName
+              ? parsedObjs.find(o => o.labelName === prevObj.labelName)
+              : undefined;
+            if (!matchedObj && prevObj.label) {
+              matchedObj = parsedObjs.find(o => o.label === prevObj.label && o.type === prevObj.type);
+            }
+            if (!matchedObj && prevObj.rawStatement) {
+              matchedObj = parsedObjs.find(o => o.rawStatement === prevObj.rawStatement && o.type === prevObj.type);
+            }
+            if (!matchedObj) {
+              const prevIdx = objectsRef.current.findIndex(o => o.id === prevId);
+              if (prevIdx >= 0 && prevIdx < parsedObjs.length && parsedObjs[prevIdx].type === prevObj.type) {
+                matchedObj = parsedObjs[prevIdx];
+              }
+            }
+            if (matchedObj) {
+              setSelectedObjectId(matchedObj.id);
+              setSelectedLine(matchedObj.lineNumber);
+            }
+          }
+        } else {
+          setSelectedLine(exactStillExists.lineNumber);
+        }
+      }
     }
   }, []);
 
@@ -316,7 +352,18 @@ export const App: React.FC = () => {
   const handleSelectObject = (lineNumber: number | null, objId?: string) => {
     setSelectedLine(lineNumber);
     if (objId) {
-      setSelectedObjectId(objId);
+      const found = objects.find(o => o.id === objId);
+      if (found) {
+        setSelectedObjectId(objId);
+      } else if (lineNumber !== null) {
+        const objOnLine = objects.find(o => {
+          const span = o.rawStatement ? o.rawStatement.split('\n').length : 1;
+          return lineNumber >= o.lineNumber && lineNumber < o.lineNumber + span;
+        });
+        setSelectedObjectId(objOnLine ? objOnLine.id : objId);
+      } else {
+        setSelectedObjectId(objId);
+      }
     } else if (lineNumber !== null) {
       const objOnLine = objects.find(o => {
         const span = o.rawStatement ? o.rawStatement.split('\n').length : 1;
@@ -539,6 +586,12 @@ export const App: React.FC = () => {
 
       if (label) {
         updatedStatement += ` "${label}"`;
+        if (mergedProps.textSize && mergedProps.textSize !== 'normal') {
+          updatedStatement += ` ${mergedProps.textSize}`;
+        }
+        if (mergedProps.textStyle) {
+          updatedStatement += ` ${mergedProps.textStyle}`;
+        }
         if (mergedProps.textAlign && mergedProps.textAlign !== 'center') {
           updatedStatement += ` ${mergedProps.textAlign}`;
         }
@@ -550,6 +603,7 @@ export const App: React.FC = () => {
       if (mergedProps.thickness) updatedStatement += ` ${mergedProps.thickness}`;
       if (mergedProps.dash) updatedStatement += ` ${mergedProps.dash}`;
       if (mergedProps.chop) updatedStatement += ` chop`;
+      if (mergedProps.invis) updatedStatement += ` invis`;
     }
     // 3. Arc Object
     else if (type === 'arc') {
@@ -672,6 +726,12 @@ export const App: React.FC = () => {
       }
       if (label) {
         updatedStatement += ` "${label}"`;
+        if (mergedProps.textSize && mergedProps.textSize !== 'normal') {
+          updatedStatement += ` ${mergedProps.textSize}`;
+        }
+        if (mergedProps.textStyle) {
+          updatedStatement += ` ${mergedProps.textStyle}`;
+        }
         if (mergedProps.textAlign && mergedProps.textAlign !== 'center') {
           updatedStatement += ` ${mergedProps.textAlign}`;
         }
@@ -699,6 +759,12 @@ export const App: React.FC = () => {
       }
       if (label) {
         updatedStatement += ` "${label}"`;
+        if (mergedProps.textSize && mergedProps.textSize !== 'normal') {
+          updatedStatement += ` ${mergedProps.textSize}`;
+        }
+        if (mergedProps.textStyle) {
+          updatedStatement += ` ${mergedProps.textStyle}`;
+        }
         if (mergedProps.textAlign && mergedProps.textAlign !== 'center') {
           updatedStatement += ` ${mergedProps.textAlign}`;
         }
@@ -706,15 +772,20 @@ export const App: React.FC = () => {
           updatedStatement += ` ${mergedProps.textPosition}`;
         }
       }
-      if (mergedProps.width) updatedStatement += ` width ${mergedProps.width}`;
-      if (mergedProps.height) updatedStatement += ` height ${mergedProps.height}`;
-      if (mergedProps.radius) updatedStatement += ` rad ${mergedProps.radius}`;
+      const rawStmt = latestObj.rawStatement || '';
+      const widKw = /\bwidth\b/i.test(rawStmt) ? 'width' : 'wid';
+      const htKw = /\bheight\b/i.test(rawStmt) ? 'height' : 'ht';
+      const radKw = /\bradius\b/i.test(rawStmt) ? 'radius' : 'rad';
+      const invisKw = /\binvisible\b/i.test(rawStmt) ? 'invisible' : 'invis';
+      if (mergedProps.width) updatedStatement += ` ${widKw} ${mergedProps.width}`;
+      if (mergedProps.height) updatedStatement += ` ${htKw} ${mergedProps.height}`;
+      if (mergedProps.radius) updatedStatement += ` ${radKw} ${mergedProps.radius}`;
       if (mergedProps.fill) updatedStatement += ` fill ${mergedProps.fill}`;
       if (mergedProps.color) updatedStatement += ` color ${mergedProps.color}`;
       if (mergedProps.fit) updatedStatement += ` fit`;
       if (mergedProps.thickness) updatedStatement += ` ${mergedProps.thickness}`;
       if (mergedProps.dash) updatedStatement += ` ${mergedProps.dash}`;
-      if (mergedProps.invis) updatedStatement += ` invis`;
+      if (mergedProps.invis) updatedStatement += ` ${invisKw}`;
     }
 
     const formatMultiLineStatement = (rawStmt: string, singleLine: string): string => {
@@ -779,7 +850,8 @@ export const App: React.FC = () => {
     let finalStatement = updatedStatement;
 
     // 다구간 선분(Multi-segment connector)인 경우 각 then 세그먼트를 '\' 개행으로 포맷
-    if (isConnectorType && activeSegments && activeSegments.length > 1) {
+    const isPathModified = newProps.pathSegments !== undefined || newProps.path !== undefined;
+    if (isConnectorType && isPathModified && activeSegments && activeSegments.length > 1) {
       let header = `${type}`;
       if (mergedProps.extraModifiers) {
         header += ` ${mergedProps.extraModifiers}`;
@@ -794,6 +866,12 @@ export const App: React.FC = () => {
       let suffix = '';
       if (label) {
         suffix += ` "${label}"`;
+        if (mergedProps.textSize && mergedProps.textSize !== 'normal') {
+          suffix += ` ${mergedProps.textSize}`;
+        }
+        if (mergedProps.textStyle) {
+          suffix += ` ${mergedProps.textStyle}`;
+        }
         if (mergedProps.textAlign && mergedProps.textAlign !== 'center') {
           suffix += ` ${mergedProps.textAlign}`;
         }
@@ -805,6 +883,7 @@ export const App: React.FC = () => {
       if (mergedProps.thickness) suffix += ` ${mergedProps.thickness}`;
       if (mergedProps.dash) suffix += ` ${mergedProps.dash}`;
       if (mergedProps.chop) suffix += ` chop`;
+      if (mergedProps.invis) suffix += ` invis`;
 
       const rawLines = latestObj.rawStatement ? latestObj.rawStatement.split('\n') : [];
       let subIndent = '    ';
@@ -850,8 +929,14 @@ export const App: React.FC = () => {
         }
       }
       finalStatement = multiLines.join('\n');
-    } else if (latestObj.rawStatement && latestObj.rawStatement.includes('\n')) {
-      finalStatement = formatMultiLineStatement(latestObj.rawStatement, updatedStatement);
+    } else if (latestObj.rawStatement) {
+      finalStatement = updateMultiLineStatement(
+        latestObj.rawStatement,
+        latestObj,
+        newProps,
+        newLabel,
+        newLabelName
+      );
     }
 
     let newCode: string;

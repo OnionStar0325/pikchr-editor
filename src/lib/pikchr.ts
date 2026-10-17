@@ -1,5 +1,6 @@
 import { CompileResult, CompileError, PikchrObject, PikchrDefinition, PikchrShapeType, PathSegment } from './types';
 export { isContinuationLine, containsStatementTerminator, isStatementCompleted } from './statementDetector';
+import { Parser } from './parser';
 
 // Pikchr WASM / JS 컴파일러 인스턴스
 let pikchrInstance: ((source: string, classname?: string, flags?: number) => string) | null = null;
@@ -391,6 +392,59 @@ export function scanSourceStatements(source: string): ScannedStatement[] {
  * 소스 코드를 파싱하여 정의(변수, 매크로, scale 등) 목록 추출
  */
 export function parseDefinitionsFromSource(source: string): PikchrDefinition[] {
+  const parseRes = Parser.parse(source);
+  if (parseRes.success && parseRes.ast) {
+    const definitions: PikchrDefinition[] = [];
+    for (const stmt of parseRes.ast.statements) {
+      if (stmt.type === 'AssignmentStatement') {
+        const varName = stmt.variable;
+        const op = stmt.operator;
+        const startChar = stmt.loc ? stmt.loc.start.offset : 0;
+        const endChar = stmt.loc ? stmt.loc.end.offset : 0;
+        const lineNumber = stmt.loc ? stmt.loc.start.line : 1;
+        const endLineNumber = stmt.loc ? stmt.loc.end.line : lineNumber;
+        const rawStatement = source.substring(startChar, endChar);
+        const rawExpr = rawStatement.replace(/^[^=+\-*/]*[+\-*/]?=\s*/, '').trim();
+        const value = op === '=' ? rawExpr : `${op} ${rawExpr}`;
+        const isGlobalProp = GLOBAL_PROPERTY_NAMES.has(varName.toLowerCase());
+
+        definitions.push({
+          id: `var_${varName}_${lineNumber}_${definitions.length}`,
+          name: varName,
+          type: isGlobalProp ? 'global_property' : 'variable',
+          value,
+          lineNumber,
+          endLineNumber,
+          startChar,
+          endChar,
+          rawStatement,
+        });
+      } else if (stmt.type === 'DefineStatement') {
+        const macroName = stmt.name;
+        const startChar = stmt.loc ? stmt.loc.start.offset : 0;
+        const endChar = stmt.loc ? stmt.loc.end.offset : 0;
+        const lineNumber = stmt.loc ? stmt.loc.start.line : 1;
+        const endLineNumber = stmt.loc ? stmt.loc.end.line : lineNumber;
+        const rawStatement = source.substring(startChar, endChar);
+        const bodyMatch = rawStatement.match(/^define\s+[a-zA-Z0-9_]+\s*\{([\s\S]*)\}$/i);
+        const value = bodyMatch ? bodyMatch[1].trim() : rawStatement;
+
+        definitions.push({
+          id: `macro_${macroName}_${lineNumber}`,
+          name: macroName,
+          type: 'macro',
+          value,
+          lineNumber,
+          endLineNumber,
+          startChar,
+          endChar,
+          rawStatement,
+        });
+      }
+    }
+    return definitions;
+  }
+
   const scanned = scanSourceStatements(source);
   const definitions: PikchrDefinition[] = [];
 
@@ -525,10 +579,174 @@ function getExpandedStatements(source: string): ExpandedStatement[] {
   return expanded;
 }
 
+function parseObjectsFromAst(source: string): PikchrObject[] | null {
+  const parseRes = Parser.parse(source);
+  if (!parseRes.success || !parseRes.ast) return null;
+
+  const objects: PikchrObject[] = [];
+  let unnamedVisualCount = 0;
+
+  const getAttrVal = (attr: any, kwRegex: string): string => {
+    if (!attr.loc) return '';
+    const full = source.substring(attr.loc.start.offset, attr.loc.end.offset).trim();
+    const regex = new RegExp('^' + kwRegex + '\\s*', 'i');
+    return full.replace(regex, '').replace(/\\\s*$/, '').trim();
+  };
+
+  const macros = new Map<string, any[]>();
+  for (const s of parseRes.ast.statements) {
+    if (s.type === 'DefineStatement') {
+      macros.set((s as any).name, (s as any).body || []);
+    }
+  }
+
+  const processStatement = (stmt: any) => {
+    if (stmt.type === 'ShapeStatement') {
+      unnamedVisualCount++;
+      const s = stmt as any;
+      const startChar = s.loc ? s.loc.start.offset : 0;
+      const endChar = s.loc ? s.loc.end.offset : 0;
+      const lineNumber = s.loc ? s.loc.start.line : 1;
+      const endLineNumber = s.loc ? s.loc.end.line : lineNumber;
+      const rawStatement = source.substring(startChar, endChar);
+
+      const properties: PikchrObject['properties'] = {};
+      const labels: string[] = [];
+
+      for (const attr of s.attributes) {
+        if (attr.type === 'TextAttribute') {
+          labels.push(attr.text);
+          if (attr.modifiers) {
+            for (const mod of attr.modifiers) {
+              if (['italic', 'bold', 'mono'].includes(mod)) properties.textStyle = mod as any;
+              else if (['big', 'small'].includes(mod)) properties.textSize = mod as any;
+              else if (['above', 'below', 'aligned', 'center'].includes(mod)) properties.textPosition = mod as any;
+              else if (['ljust', 'rjust'].includes(mod)) properties.textAlign = mod as any;
+            }
+          }
+        } else if (attr.type === 'StyleAttribute') {
+          if (attr.property === 'fill') properties.fill = getAttrVal(attr, 'fill');
+          else if (attr.property === 'color') properties.color = getAttrVal(attr, 'color');
+          else if (attr.property === 'thick' || attr.property === 'thin') properties.thickness = attr.property;
+          else if (attr.property === 'dashed' || attr.property === 'dotted') properties.dash = attr.property;
+          else if (attr.property === 'invis') properties.invis = true;
+        } else if (attr.type === 'DimensionAttribute') {
+          const val = getAttrVal(attr, attr.rawName || attr.name);
+          if (attr.name === 'width') properties.width = val;
+          else if (attr.name === 'height') properties.height = val;
+          else if (attr.name === 'radius') properties.radius = val;
+          else if (attr.name === 'diameter') properties.diameter = val;
+          else if (attr.name === 'thickness') properties.thickness = val as any;
+        } else if (attr.type === 'PositionAttribute') {
+          if (attr.kind === 'from') properties.from = getAttrVal(attr, 'from');
+          else if (attr.kind === 'to') properties.to = getAttrVal(attr, 'to');
+          else if (attr.kind === 'at') properties.at = getAttrVal(attr, 'at');
+          else if (attr.kind === 'with_at') {
+            properties.with = attr.anchor;
+            properties.withAnchor = attr.anchor;
+            properties.at = getAttrVal(attr, 'with\\s+[^\\s]+\\s+at');
+          } else if (attr.kind === 'chop') properties.chop = true;
+          else if (attr.kind === 'until_even_with') properties.until = getAttrVal(attr, 'until(?:\\s+even\\s+with)?');
+        } else if (attr.type === 'DirectionAttribute') {
+          properties.direction = attr.direction;
+          if (attr.distance) properties.length = getAttrVal(attr, attr.direction);
+        } else if (attr.type === 'ArcAttribute') {
+          if (attr.property === 'arrow_head') properties.arrowHead = attr.value;
+          else if (attr.property === 'cw' || attr.property === 'ccw') properties.arcDir = attr.property;
+        } else if (attr.type === 'FitAttribute') {
+          properties.fit = true;
+        } else if (attr.type === 'BehindAttribute') {
+          const b = getAttrVal(attr, 'behind');
+          properties.extraModifiers = properties.extraModifiers ? `${properties.extraModifiers} behind ${b}` : `behind ${b}`;
+        } else if (attr.type === 'SameAttribute') {
+          const sm = attr.asTarget ? `same as ${getAttrVal(attr, 'same\\s+as')}` : 'same';
+          properties.extraModifiers = properties.extraModifiers ? `${properties.extraModifiers} ${sm}` : sm;
+        }
+      }
+
+      // 커넥터/경로 오브젝트의 경우 path 및 pathSegments 구성
+      if (['arrow', 'line', 'spline', 'move'].includes(s.shapeType)) {
+        const rawPath = extractConnectorPath(rawStatement, s.shapeType);
+        if (rawPath) {
+          properties.path = rawPath;
+          const parsedSegments = parsePathIntoSegments(rawPath);
+          if (parsedSegments.segments.length > 0) {
+            properties.pathSegments = parsedSegments.segments;
+          }
+        }
+      }
+
+      const labelText = labels.join(' ');
+      const id = `obj_${lineNumber}_${objects.length + 1}`;
+      const displayName = s.label
+        ? `${s.label}${labelText ? ` ("${labelText}")` : ` (${s.shapeType})`}`
+        : (labelText ? `"${labelText}"` : `${s.shapeType} ${unnamedVisualCount}`);
+
+      objects.push({
+        id,
+        name: displayName,
+        labelName: s.label,
+        type: s.shapeType as PikchrShapeType,
+        label: labelText,
+        lineNumber,
+        endLineNumber,
+        startChar,
+        endChar,
+        rawStatement,
+        properties,
+      });
+    } else if (stmt.type === 'DirectionStatement') {
+      unnamedVisualCount++;
+      const s = stmt as any;
+      const startChar = s.loc ? s.loc.start.offset : 0;
+      const endChar = s.loc ? s.loc.end.offset : 0;
+      const lineNumber = s.loc ? s.loc.start.line : 1;
+      const endLineNumber = s.loc ? s.loc.end.line : lineNumber;
+      const rawStatement = source.substring(startChar, endChar);
+      const id = `obj_${lineNumber}_${objects.length + 1}`;
+      objects.push({
+        id,
+        name: rawStatement,
+        type: 'direction',
+        label: '',
+        lineNumber,
+        endLineNumber,
+        startChar,
+        endChar,
+        rawStatement,
+        properties: {
+          direction: s.direction,
+          length: s.distance ? getAttrVal(s, s.direction) : undefined,
+        },
+      });
+    } else if (stmt.type === 'BlockStatement' && Array.isArray((stmt as any).body)) {
+      for (const inner of (stmt as any).body) {
+        processStatement(inner);
+      }
+    } else if (stmt.type === 'MacroCallStatement' && macros.has((stmt as any).name)) {
+      const macroBody = macros.get((stmt as any).name)!;
+      for (const mStmt of macroBody) {
+        processStatement(mStmt);
+      }
+    }
+  };
+
+  for (const stmt of parseRes.ast.statements) {
+    processStatement(stmt);
+  }
+
+  return objects;
+}
+
 /**
  * 소스 코드를 파싱하여 오브젝트 메타데이터 목록 생성
  */
 export function parseObjectsFromSource(source: string): PikchrObject[] {
+  const astObjects = parseObjectsFromAst(source);
+  if (astObjects) {
+    return astObjects;
+  }
+
   const expanded = getExpandedStatements(source);
   const objects: PikchrObject[] = [];
   let unnamedVisualCount = 0;
@@ -791,16 +1009,592 @@ export function extractConnectorPath(rawStmt: string, objType: string): string {
   s = s.replace(/^[A-Z][a-zA-Z0-9_]*\s*:\s*/, '');
   s = s.replace(new RegExp('^' + objType + '\\b', 'i'), '').trim();
   s = s.replace(/^(<->|<-|->)\s*/, '');
+  s = s.replace(/\b(?:invis|thick|thin|solid|dashed|dotted|chop)\b/gi, '').trim();
   const quoteIdx = s.indexOf('"');
   if (quoteIdx !== -1) {
     return s.substring(0, quoteIdx).trim();
   }
   return s
     .replace(/\bcolor\s+(0x[0-9a-fA-F]+|[a-zA-Z]+)/gi, '')
-    .replace(/\b(?:thick|thin|solid|dashed|dotted|chop)\b/gi, '')
-    .replace(/\b(?:above|below|aligned|ljust|rjust|big|small|bold|italic|mono)\b/gi, '')
-    .trim();
 }
+
+/**
+ * 따옴표 바깥의 연속된 공백만 1개의 공백으로 정리하고 따옴표 내부의 공백은 절대 변경하지 않습니다.
+ */
+export function collapseWhitespaceOutsideQuotes(text: string): string {
+  let res = '';
+  let inString = false;
+  let inSpaces = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      res += ch;
+      if (ch === '\\' && i + 1 < text.length) {
+        res += text[++i];
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      inSpaces = false;
+      res += ch;
+      continue;
+    }
+    if (ch === ' ' || ch === '\t') {
+      if (!inSpaces) {
+        res += ' ';
+        inSpaces = true;
+      }
+    } else {
+      inSpaces = false;
+      res += ch;
+    }
+  }
+  return res;
+}
+
+/**
+ * Pikchr 문장에서 특정 프로퍼티 수정/삭제/추가 시 기존의 줄 구조(단일행, 멀티라인, 들여쓰기, 백슬래시 연결)를 유지하며
+ * 기존 코드의 토큰 순서, 여러 개의 텍스트 문자열, 동의어 키워드(wid/width, ht/height, rad/radius, diam/diameter, invis/invisible 등)를 오염시키지 않고 갱신합니다.
+ * 멀티라인에서 한 개 행을 차지하던 속성이 모두 삭제되는 경우 해당 행을 삭제함.
+ */
+export function updateMultiLineStatement(
+  rawStatement: string,
+  targetObj: PikchrObject,
+  newProps: Partial<PikchrObjectProperties>,
+  newLabel?: string,
+  newLabelName?: string
+): string {
+  if (!rawStatement) {
+    return rawStatement;
+  }
+
+  const parseRes = Parser.parse(rawStatement);
+  if (!parseRes.success || !parseRes.ast || parseRes.ast.statements.length === 0) {
+    return rawStatement;
+  }
+
+  const stmt = parseRes.ast.statements[0];
+  if (stmt.type !== 'ShapeStatement' && stmt.type !== 'DirectionStatement') {
+    return rawStatement;
+  }
+
+  interface Replacement {
+    startOffset: number;
+    endOffset: number;
+    newText: string;
+  }
+  const replacements: Replacement[] = [];
+  const handledKeys = new Set<string>();
+  const addedTexts: string[] = [];
+
+  const getAttrContentRange = (loc?: any): { startOffset: number; endOffset: number } => {
+    if (!loc) return { startOffset: 0, endOffset: 0 };
+    const fullSlice = rawStatement.substring(loc.start.offset, loc.end.offset);
+    const match = fullSlice.match(/((?:\\[ \t]*\r?\n[ \t]*|[ \t]+)+)$/);
+    if (match) {
+      return {
+        startOffset: loc.start.offset,
+        endOffset: loc.end.offset - match[1].length,
+      };
+    }
+    return {
+      startOffset: loc.start.offset,
+      endOffset: loc.end.offset,
+    };
+  };
+
+  // 1. 라벨 식별자 (Label:)
+  if (newLabelName !== undefined) {
+    const labelMatch = rawStatement.match(/^([A-Z][a-zA-Z0-9_]*\s*:\s*)/);
+    const trimmedLabel = newLabelName.trim();
+    if (labelMatch) {
+      replacements.push({
+        startOffset: 0,
+        endOffset: labelMatch[0].length,
+        newText: trimmedLabel ? `${trimmedLabel}: ` : '',
+      });
+    } else if (trimmedLabel) {
+      replacements.push({
+        startOffset: 0,
+        endOffset: 0,
+        newText: `${trimmedLabel}: `,
+      });
+    }
+  }
+
+  const attrs = (stmt as any).attributes || [];
+
+  // 2. TextAttribute
+  const textAttrs = attrs.filter((a: any) => a.type === 'TextAttribute');
+  const isTextModified =
+    newLabel !== undefined ||
+    'textStyle' in newProps ||
+    'textSize' in newProps ||
+    'textAlign' in newProps ||
+    'textPosition' in newProps;
+
+  if (isTextModified) {
+    if (newLabel !== undefined) {
+      const activeLabel = newLabel.trim();
+      let textStr = '';
+      if (activeLabel) {
+        textStr = `"${activeLabel}"`;
+        const ts = newProps.textSize !== undefined ? newProps.textSize : targetObj.properties.textSize;
+        if (ts && ts !== 'normal') textStr += ` ${ts}`;
+        const st = newProps.textStyle !== undefined ? newProps.textStyle : targetObj.properties.textStyle;
+        if (st) textStr += ` ${st}`;
+        const ta = newProps.textAlign !== undefined ? newProps.textAlign : targetObj.properties.textAlign;
+        if (ta && ta !== 'center') textStr += ` ${ta}`;
+        const tp = newProps.textPosition !== undefined ? newProps.textPosition : targetObj.properties.textPosition;
+        if (tp && tp !== 'center') textStr += ` ${tp}`;
+      }
+
+      if (textAttrs.length > 0) {
+        handledKeys.add('label');
+        const firstLoc = textAttrs[0].loc;
+        const lastLoc = textAttrs[textAttrs.length - 1].loc;
+        const range = getAttrContentRange({ start: firstLoc.start, end: lastLoc.end });
+        replacements.push({
+          startOffset: range.startOffset,
+          endOffset: range.endOffset,
+          newText: textStr,
+        });
+      } else if (textStr) {
+        addedTexts.push(textStr);
+      }
+    } else {
+      // 라벨 텍스트 자체는 변경하지 않고 텍스트 스타일/크기/위치 모디파이어만 변경 시 기존 따옴표 문자열들 보존
+      if (textAttrs.length > 0) {
+        handledKeys.add('label');
+        const origStrings = textAttrs.map((ta: any) => {
+          const slice = rawStatement.substring(ta.loc.start.offset, ta.loc.end.offset);
+          const m = slice.match(/^"([^"\\]*(?:\\.[^"\\]*)*)"/);
+          return m ? m[0] : `"${ta.text}"`;
+        }).join(' ');
+
+        let textStr = origStrings;
+        const ts = newProps.textSize !== undefined ? newProps.textSize : targetObj.properties.textSize;
+        if (ts && ts !== 'normal') textStr += ` ${ts}`;
+        const st = newProps.textStyle !== undefined ? newProps.textStyle : targetObj.properties.textStyle;
+        if (st) textStr += ` ${st}`;
+        const ta = newProps.textAlign !== undefined ? newProps.textAlign : targetObj.properties.textAlign;
+        if (ta && ta !== 'center') textStr += ` ${ta}`;
+        const tp = newProps.textPosition !== undefined ? newProps.textPosition : targetObj.properties.textPosition;
+        if (tp && tp !== 'center') textStr += ` ${tp}`;
+
+        const firstLoc = textAttrs[0].loc;
+        const lastLoc = textAttrs[textAttrs.length - 1].loc;
+        const range = getAttrContentRange({ start: firstLoc.start, end: lastLoc.end });
+        replacements.push({
+          startOffset: range.startOffset,
+          endOffset: range.endOffset,
+          newText: textStr,
+        });
+      }
+    }
+  }
+
+  // 3. Dimension Attributes (width, height, radius, diameter, thickness)
+  const dimAttrs = attrs.filter((a: any) => a.type === 'DimensionAttribute');
+
+  // width
+  if ('width' in newProps) {
+    const attr = dimAttrs.find((a: any) => a.name === 'width');
+    if (attr) {
+      handledKeys.add('width');
+      const val = newProps.width?.trim();
+      const range = getAttrContentRange(attr.loc);
+      replacements.push({
+        startOffset: range.startOffset,
+        endOffset: range.endOffset,
+        newText: val ? `${attr.rawName || 'wid'} ${val}` : '',
+      });
+    } else if (newProps.width?.trim()) {
+      const defaultWid = /\bwidth\b/i.test(rawStatement) ? 'width' : 'wid';
+      addedTexts.push(`${defaultWid} ${newProps.width.trim()}`);
+    }
+  }
+
+  // height
+  if ('height' in newProps) {
+    const attr = dimAttrs.find((a: any) => a.name === 'height');
+    if (attr) {
+      handledKeys.add('height');
+      const val = newProps.height?.trim();
+      const range = getAttrContentRange(attr.loc);
+      replacements.push({
+        startOffset: range.startOffset,
+        endOffset: range.endOffset,
+        newText: val ? `${attr.rawName || 'ht'} ${val}` : '',
+      });
+    } else if (newProps.height?.trim()) {
+      const defaultHt = /\bheight\b/i.test(rawStatement) ? 'height' : 'ht';
+      addedTexts.push(`${defaultHt} ${newProps.height.trim()}`);
+    }
+  }
+
+  // radius
+  if ('radius' in newProps) {
+    const attr = dimAttrs.find((a: any) => a.name === 'radius');
+    if (attr) {
+      handledKeys.add('radius');
+      const val = newProps.radius?.trim();
+      const range = getAttrContentRange(attr.loc);
+      replacements.push({
+        startOffset: range.startOffset,
+        endOffset: range.endOffset,
+        newText: val ? `${attr.rawName || 'rad'} ${val}` : '',
+      });
+    } else if (newProps.radius?.trim()) {
+      const defaultRad = /\bradius\b/i.test(rawStatement) ? 'radius' : 'rad';
+      addedTexts.push(`${defaultRad} ${newProps.radius.trim()}`);
+    }
+  }
+
+  // diameter
+  if ('diameter' in newProps) {
+    const attr = dimAttrs.find((a: any) => a.name === 'diameter');
+    if (attr) {
+      handledKeys.add('diameter');
+      const val = newProps.diameter?.trim();
+      const range = getAttrContentRange(attr.loc);
+      replacements.push({
+        startOffset: range.startOffset,
+        endOffset: range.endOffset,
+        newText: val ? `${attr.rawName || 'diam'} ${val}` : '',
+      });
+    } else if (newProps.diameter?.trim()) {
+      const defaultDiam = /\bdiameter\b/i.test(rawStatement) ? 'diameter' : 'diam';
+      addedTexts.push(`${defaultDiam} ${newProps.diameter.trim()}`);
+    }
+  }
+
+  // 4. Style Attributes (fill, color, dash, invis, thickness)
+  const styleAttrs = attrs.filter((a: any) => a.type === 'StyleAttribute');
+
+  // thickness (StyleAttribute thick/thin 또는 DimensionAttribute thickness)
+  if ('thickness' in newProps) {
+    const sAttr = styleAttrs.find((a: any) => a.property === 'thick' || a.property === 'thin');
+    const dAttr = dimAttrs.find((a: any) => a.name === 'thickness');
+    const attr = sAttr || dAttr;
+    if (attr) {
+      handledKeys.add('thickness');
+      const val = newProps.thickness;
+      const isThick = val === 'thick' || val === 'thin';
+      const range = getAttrContentRange(attr.loc);
+      const rawWord = attr.rawName || (attr as any).rawProperty || val;
+      replacements.push({
+        startOffset: range.startOffset,
+        endOffset: range.endOffset,
+        newText: isThick ? rawWord : '',
+      });
+    } else if (newProps.thickness === 'thick' || newProps.thickness === 'thin') {
+      addedTexts.push(newProps.thickness);
+    }
+  }
+
+  // fill
+  if ('fill' in newProps) {
+    const attr = styleAttrs.find((a: any) => a.property === 'fill');
+    if (attr) {
+      handledKeys.add('fill');
+      const val = newProps.fill?.trim();
+      const range = getAttrContentRange(attr.loc);
+      replacements.push({
+        startOffset: range.startOffset,
+        endOffset: range.endOffset,
+        newText: val ? `fill ${val}` : '',
+      });
+    } else if (newProps.fill?.trim()) {
+      addedTexts.push(`fill ${newProps.fill.trim()}`);
+    }
+  }
+
+  // color
+  if ('color' in newProps) {
+    const attr = styleAttrs.find((a: any) => a.property === 'color');
+    if (attr) {
+      handledKeys.add('color');
+      const val = newProps.color?.trim();
+      const range = getAttrContentRange(attr.loc);
+      replacements.push({
+        startOffset: range.startOffset,
+        endOffset: range.endOffset,
+        newText: val ? `color ${val}` : '',
+      });
+    } else if (newProps.color?.trim()) {
+      addedTexts.push(`color ${newProps.color.trim()}`);
+    }
+  }
+
+  // dash
+  if ('dash' in newProps) {
+    const attr = styleAttrs.find((a: any) => a.property === 'dashed' || a.property === 'dotted');
+    if (attr) {
+      handledKeys.add('dash');
+      const val = newProps.dash;
+      const isDash = val === 'dashed' || val === 'dotted';
+      const range = getAttrContentRange(attr.loc);
+      replacements.push({
+        startOffset: range.startOffset,
+        endOffset: range.endOffset,
+        newText: isDash ? val : '',
+      });
+    } else if (newProps.dash === 'dashed' || newProps.dash === 'dotted') {
+      addedTexts.push(newProps.dash);
+    }
+  }
+
+  // invis
+  if ('invis' in newProps) {
+    const attr = styleAttrs.find((a: any) => a.property === 'invis');
+    if (attr) {
+      handledKeys.add('invis');
+      const range = getAttrContentRange(attr.loc);
+      const rawWord = (attr as any).rawProperty || (/\binvisible\b/i.test(rawStatement) ? 'invisible' : 'invis');
+      replacements.push({
+        startOffset: range.startOffset,
+        endOffset: range.endOffset,
+        newText: newProps.invis ? rawWord : '',
+      });
+    } else if (newProps.invis) {
+      const defaultInvis = /\binvisible\b/i.test(rawStatement) ? 'invisible' : 'invis';
+      addedTexts.push(defaultInvis);
+    }
+  }
+
+  // 5. FitAttribute
+  if ('fit' in newProps) {
+    const attr = attrs.find((a: any) => a.type === 'FitAttribute');
+    if (attr) {
+      handledKeys.add('fit');
+      const range = getAttrContentRange(attr.loc);
+      replacements.push({
+        startOffset: range.startOffset,
+        endOffset: range.endOffset,
+        newText: newProps.fit ? 'fit' : '',
+      });
+    } else if (newProps.fit) {
+      addedTexts.push('fit');
+    }
+  }
+
+  // 6. Position Attributes (from, to, until, at, chop)
+  const posAttrs = attrs.filter((a: any) => a.type === 'PositionAttribute');
+
+  // chop
+  if ('chop' in newProps) {
+    const attr = posAttrs.find((a: any) => a.kind === 'chop');
+    if (attr) {
+      handledKeys.add('chop');
+      const range = getAttrContentRange(attr.loc);
+      replacements.push({
+        startOffset: range.startOffset,
+        endOffset: range.endOffset,
+        newText: newProps.chop ? 'chop' : '',
+      });
+    } else if (newProps.chop) {
+      addedTexts.push('chop');
+    }
+  }
+
+  // from
+  if ('from' in newProps) {
+    const attr = posAttrs.find((a: any) => a.kind === 'from');
+    if (attr) {
+      handledKeys.add('from');
+      const val = newProps.from?.trim();
+      const range = getAttrContentRange(attr.loc);
+      replacements.push({
+        startOffset: range.startOffset,
+        endOffset: range.endOffset,
+        newText: val ? `from ${val}` : '',
+      });
+    } else if (newProps.from?.trim()) {
+      addedTexts.push(`from ${newProps.from.trim()}`);
+    }
+  }
+
+  // to
+  if ('to' in newProps) {
+    const attr = posAttrs.find((a: any) => a.kind === 'to');
+    if (attr) {
+      handledKeys.add('to');
+      const val = newProps.to?.trim();
+      const range = getAttrContentRange(attr.loc);
+      replacements.push({
+        startOffset: range.startOffset,
+        endOffset: range.endOffset,
+        newText: val ? `to ${val}` : '',
+      });
+    } else if (newProps.to?.trim()) {
+      addedTexts.push(`to ${newProps.to.trim()}`);
+    }
+  }
+
+  // until
+  if ('until' in newProps) {
+    const attr = posAttrs.find((a: any) => a.kind === 'until_even_with');
+    if (attr) {
+      handledKeys.add('until');
+      const val = newProps.until?.trim();
+      const stripped = val ? val.replace(/^until\s+(?:even\s+with\s+)?/i, '').trim() : '';
+      const range = getAttrContentRange(attr.loc);
+      replacements.push({
+        startOffset: range.startOffset,
+        endOffset: range.endOffset,
+        newText: stripped ? `until even with ${stripped}` : '',
+      });
+    } else if (newProps.until?.trim()) {
+      const stripped = newProps.until.trim().replace(/^until\s+(?:even\s+with\s+)?/i, '').trim();
+      addedTexts.push(`until even with ${stripped}`);
+    }
+  }
+
+  // at / with
+  if ('at' in newProps) {
+    const attr = posAttrs.find((a: any) => a.kind === 'at' || a.kind === 'with_at');
+    if (attr) {
+      handledKeys.add('at');
+      const val = newProps.at?.trim();
+      const range = getAttrContentRange(attr.loc);
+      let replacement = '';
+      if (val) {
+        if (attr.kind === 'with_at' && attr.anchor) {
+          replacement = `with ${attr.anchor} at ${val}`;
+        } else {
+          replacement = `at ${val}`;
+        }
+      }
+      replacements.push({
+        startOffset: range.startOffset,
+        endOffset: range.endOffset,
+        newText: replacement,
+      });
+    } else if (newProps.at?.trim()) {
+      const val = newProps.at.trim();
+      if (newProps.with?.trim()) {
+        addedTexts.push(`with ${newProps.with.trim()} at ${val}`);
+      } else {
+        addedTexts.push(`at ${val}`);
+      }
+    }
+  }
+
+  // arcDir (cw / ccw / clockwise / counterclockwise)
+  if ('arcDir' in newProps) {
+    const arcAttrs = attrs.filter((a: any) => a.type === 'ArcAttribute');
+    const attr = arcAttrs.find((a: any) => a.property === 'cw' || a.property === 'ccw');
+    if (attr) {
+      handledKeys.add('arcDir');
+      const val = newProps.arcDir;
+      const isDir = val === 'cw' || val === 'ccw';
+      const range = getAttrContentRange(attr.loc);
+      let newWord = '';
+      if (isDir) {
+        if (attr.rawProperty && (attr.rawProperty.startsWith('clock') || attr.rawProperty.startsWith('counter'))) {
+          newWord = val === 'cw' ? 'clockwise' : 'counterclockwise';
+        } else {
+          newWord = val;
+        }
+      }
+      replacements.push({
+        startOffset: range.startOffset,
+        endOffset: range.endOffset,
+        newText: newWord,
+      });
+    } else if (newProps.arcDir) {
+      addedTexts.push(newProps.arcDir);
+    }
+  }
+
+  // arrowHead (-> / <- / <->)
+  if ('arrowHead' in newProps) {
+    const arcAttrs = attrs.filter((a: any) => a.type === 'ArcAttribute');
+    const attr = arcAttrs.find((a: any) => a.property === 'arrow_head');
+    if (attr) {
+      handledKeys.add('arrowHead');
+      const val = newProps.arrowHead;
+      const isArrow = val === '->' || val === '<-' || val === '<->';
+      const range = getAttrContentRange(attr.loc);
+      replacements.push({
+        startOffset: range.startOffset,
+        endOffset: range.endOffset,
+        newText: isArrow ? val : '',
+      });
+    } else if (newProps.arrowHead && newProps.arrowHead !== 'none') {
+      addedTexts.push(newProps.arrowHead);
+    }
+  }
+
+  // 7. 치환 적용: 뒤쪽 오프셋부터 역순으로 적용하여 인덱스 밀림 방지
+  replacements.sort((a, b) => b.startOffset - a.startOffset);
+
+  let updated = rawStatement;
+  for (const rep of replacements) {
+    updated = updated.substring(0, rep.startOffset) + rep.newText + updated.substring(rep.endOffset);
+  }
+
+  // 8. 신규 추가된 속성 붙이기
+  if (addedTexts.length > 0) {
+    const addedStr = addedTexts.join(' ');
+    const lines = updated.split('\n');
+    const lastIdx = lines.length - 1;
+    let lastLine = lines[lastIdx];
+    if (/\\\s*$/.test(lastLine)) {
+      lastLine = lastLine.replace(/\s*\\\s*$/, '') + ' ' + addedStr + ' \\';
+    } else {
+      lastLine = lastLine.trimEnd() + ' ' + addedStr;
+    }
+    lines[lastIdx] = lastLine;
+    updated = lines.join('\n');
+  }
+
+  // 9. 행 검사 및 "한 개 행을 차지하던 속성이 모두 삭제된 행" 삭제
+  const originalRawLines = rawStatement.split('\n');
+  const rawLines = updated.split('\n');
+  const survivingLines: string[] = [];
+
+  for (let i = 0; i < rawLines.length; i++) {
+    const line = rawLines[i];
+    const content = line.replace(/\\$/, '').trim();
+
+    // 0번째 행은 라벨 식별자나 shape 타입(box, line 등)이 있으므로 항상 보존
+    if (i === 0) {
+      const origIndent = originalRawLines[0].match(/^(\s*)/)?.[1] || '';
+      const cleaned = collapseWhitespaceOutsideQuotes(content);
+      survivingLines.push(origIndent + cleaned);
+      continue;
+    }
+
+    // 1번째 이후 행에서 속성이 모두 삭제되어 공백만 남은 경우 해당 행 삭제
+    if (content === '') {
+      continue;
+    }
+
+    // 살아남은 행: 원래 행의 앞쪽 들여쓰기 유지 및 내용 공백 정돈
+    const origIndent = (originalRawLines[i] && originalRawLines[i].match(/^(\s*)/)?.[1]) ?? (line.match(/^(\s*)/)?.[1] || '    ');
+    const cleanedContent = collapseWhitespaceOutsideQuotes(content);
+    survivingLines.push(origIndent + cleanedContent);
+  }
+
+  // 10. 백슬래시(\) 연결 재구성
+  const finalLines: string[] = [];
+  for (let i = 0; i < survivingLines.length; i++) {
+    const line = survivingLines[i].replace(/\\$/, '').trimEnd();
+    if (i < survivingLines.length - 1) {
+      finalLines.push(`${line} \\`);
+    } else {
+      finalLines.push(line);
+    }
+  }
+
+  return finalLines.join('\n');
+}
+
 
 /**
  * 경로(Path) 문자열을 시작점(from)과 then 다구간 세그먼트 배열로 분해
@@ -982,133 +1776,90 @@ interface VisualObject {
   statement: string;
   textCount: number;
   pathCount: number;
+  texts: string[];
   isInvis: boolean;
+  isBehind: boolean;
 }
 
 /**
  * 소스 코드에서 실제 SVG 요소를 생성하는 시각적 객체(Visual Objects) 목록 추출
  */
 function parseVisualStatements(source: string): VisualObject[] {
-  const expanded = getExpandedStatements(source);
-  const visualObjs: VisualObject[] = [];
-  let lastBehindInsertIndex: number | null = null;
+  const objects = parseObjectsFromSource(source);
+  const behindObjs: VisualObject[] = [];
+  const normalObjs: VisualObject[] = [];
 
-  for (const { id, text, lineNumber } of expanded) {
-    const stmtTrimmed = text.trim();
-    if (!stmtTrimmed) continue;
+  const lastObjOfTypeHadBehind = new Map<string, boolean>();
+  let lastObjHadBehind = false;
 
-    if (stmtTrimmed.startsWith('define ') || /^[a-zA-Z$@][a-zA-Z0-9_]*\s*([+\-*/]?=)\s*/.test(stmtTrimmed)) {
-      continue;
-    }
-
-    if (stmtTrimmed === '[' || stmtTrimmed === ']' || stmtTrimmed === '{' || stmtTrimmed === '}') {
-      continue;
-    }
-
-    let labelDef: string | undefined;
-    let body = stmtTrimmed;
-
-    const labelColonMatch = stmtTrimmed.match(/^([A-Z][a-zA-Z0-9_]*)\s*:\s*(.*)$/);
-    if (labelColonMatch) {
-      labelDef = labelColonMatch[1];
-      body = labelColonMatch[2].trim();
-    }
-
-    let matchedType: PikchrShapeType | null = null;
-    if (body.startsWith('"') || /^\s*"/.test(body)) {
-      matchedType = 'text';
-    } else {
-      // 따옴표 문자열 내부 단어 및 상대 참조(last arrow 등) 제외 후 도형 키워드 탐색
-      const nonStringBody = body.replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/g, '');
-      const nonRelative = nonStringBody.replace(/\b(?:last|first|previous|\d+(?:st|nd|rd|th)?\s+last)\s+[a-z]+/gi, '');
-      const words = nonRelative.trim().split(/\s+/);
-
-      for (const word of words) {
-        const cleanWord = word.toLowerCase().replace(/[^a-z]/g, '');
-        if (SHAPE_KEYWORDS.includes(cleanWord as PikchrShapeType)) {
-          matchedType = cleanWord as PikchrShapeType;
-          break;
-        }
-      }
-
-      if (!matchedType) {
-        const firstWord = words[0]?.toLowerCase().replace(/[^a-z]/g, '');
-        if (DIRECTION_KEYWORDS.includes(firstWord)) {
-          matchedType = 'direction';
-        } else if (body.includes('->') || body.includes('<-')) {
-          matchedType = 'arrow';
-        } else if (body.startsWith('[') || body.includes('[')) {
-          matchedType = 'block';
-        } else if (body.startsWith('"') || /^\s*"/.test(body)) {
-          matchedType = 'text';
-        } else {
-          continue;
-        }
-      }
-    }
-
+  for (const obj of objects) {
     // move 및 direction 명령어는 SVG 그래픽 요소를 생성하지 않음
-    if (matchedType === 'move' || matchedType === 'direction') {
+    if (obj.type === 'move' || obj.type === 'direction') {
       continue;
     }
 
-    const nonStringBody = body.replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/g, '');
-    const isInvis = nonStringBody.includes('invis') || nonStringBody.includes('invisible');
-    const textCount = countStringsInStatement(body);
-    
-    const objectId = id || `obj_${lineNumber}_${visualObjs.length + 1}`;
-
-    // 레이블 정의가 없는 경우 첫 번째 식별자형 문자열(예: "C0")을 자동 레이블로 등록
-    const firstStringMatch = body.match(/"([^"\\]*(?:\\.[^"\\]*)*)"/);
-    const autoLabel = firstStringMatch ? firstStringMatch[1].trim() : undefined;
+    const rawStatement = obj.rawStatement || '';
+    const nonStringBody = rawStatement.replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/g, '');
+    const isInvis = !!obj.properties.invis || /\b(?:invis|invisible)\b/i.test(nonStringBody);
+    const textMatches = rawStatement.match(/"([^"\\]*(?:\\.[^"\\]*)*)"/g);
+    const texts = textMatches ? textMatches.map(m => m.replace(/^"|"$/g, '')) : [];
+    const textCount = texts.length;
 
     let pathCount = 1;
-    if (matchedType === 'file' && !isInvis) {
+    if (obj.type === 'file' && !isInvis) {
       pathCount = 2;
-    } else if (matchedType === 'text' || isInvis) {
+    } else if (obj.type === 'text' || isInvis) {
       pathCount = 0;
     }
 
-    // Behind check
-    const behindMatch = nonStringBody.match(/\bbehind\s+([A-Z0-9_]+|previous|last\s+[a-z]+)/i);
-    const behindTarget = behindMatch ? behindMatch[1] : null;
+    // SVG 그래픽 요소를 전혀 생성하지 않는 객체(예: 라벨 텍스트 없는 invis 도형)는 제외
+    if (pathCount === 0 && textCount === 0) {
+      continue;
+    }
+
+    // Behind check: Pikchr 컴파일러는 behind 속성을 가진 객체들을 behind 버퍼에 모아 SVG 최상단(가장 먼저)에 렌더링
+    const hasExplicitBehind = /\bbehind\b/i.test(nonStringBody);
+    let isBehind = false;
+    if (hasExplicitBehind) {
+      isBehind = true;
+    } else if (/\bsame\b/i.test(nonStringBody)) {
+      const sameAsMatch = nonStringBody.match(/\bsame\s+as\s+([A-Z0-9_]+|previous|first\s+[a-z]+|last\s+[a-z]+|\d+(?:st|nd|rd|th)?\s+[a-z]+)/i);
+      if (sameAsMatch) {
+        const targetName = sameAsMatch[1];
+        const targetObj = objects.find(o => o.labelName === targetName || (o.label && o.label.startsWith(targetName)));
+        if (targetObj && /\bbehind\b/i.test(targetObj.rawStatement || '')) {
+          isBehind = true;
+        }
+      } else if (lastObjOfTypeHadBehind.has(obj.type)) {
+        isBehind = !!lastObjOfTypeHadBehind.get(obj.type);
+      } else if (lastObjHadBehind) {
+        isBehind = true;
+      }
+    }
+    lastObjHadBehind = isBehind;
+    lastObjOfTypeHadBehind.set(obj.type, isBehind);
 
     const vObj: VisualObject = {
-      id: objectId,
-      labelDef: labelDef || autoLabel,
-      type: matchedType,
-      lineNumber,
-      statement: stmtTrimmed,
+      id: obj.id,
+      labelDef: obj.labelName || (obj.label ? obj.label.split(' ')[0] : undefined),
+      type: obj.type,
+      lineNumber: obj.lineNumber,
+      statement: rawStatement,
       textCount,
       pathCount,
+      texts,
       isInvis,
+      isBehind,
     };
 
-    if (behindTarget) {
-      let targetIdx = -1;
-      if (behindTarget.toLowerCase() === 'previous' || behindTarget.toLowerCase().startsWith('last')) {
-        targetIdx = visualObjs.length - 1;
-      } else {
-        // Pikchr 런타임 스코핑: 선언 이전 객체 중 해당 라벨을 가진 가장 최근 객체 탐색
-        targetIdx = visualObjs.map(o => o.labelDef).lastIndexOf(behindTarget);
-      }
-      if (targetIdx >= 0) {
-        visualObjs.splice(targetIdx, 0, vObj);
-        lastBehindInsertIndex = targetIdx + 1;
-      } else {
-        visualObjs.push(vObj);
-        lastBehindInsertIndex = null;
-      }
-    } else if (lastBehindInsertIndex !== null && stmtTrimmed.includes('same')) {
-      visualObjs.splice(lastBehindInsertIndex, 0, vObj);
-      lastBehindInsertIndex++;
+    if (isBehind) {
+      behindObjs.push(vObj);
     } else {
-      visualObjs.push(vObj);
-      lastBehindInsertIndex = null;
+      normalObjs.push(vObj);
     }
   }
 
-  return visualObjs;
+  return [...behindObjs, ...normalObjs];
 }
 
 /**
@@ -1162,6 +1913,22 @@ function tagSvgElements(svgString: string, source: string): string {
 
   const taggedContent = content.replace(/(<(path|circle|ellipse|polygon|text)\b)([^>]*>)/gi, (match, openTag, tagName, rest) => {
     const tag = tagName.toLowerCase();
+
+    // 자가 복구 / 정렬 동기화:
+    // 들어온 태그가 text인데 현재 객체에 남은 텍스트가 없다면, 텍스트를 가진 다음 객체로 자동 전진
+    if (tag === 'text' && remainingTexts <= 0) {
+      while (vIndex < visualObjs.length - 1 && visualObjs[vIndex].textCount <= 0) {
+        vIndex++;
+      }
+      setupObj(vIndex);
+    } else if (['path', 'circle', 'ellipse'].includes(tag) && remainingPaths <= 0) {
+      // 들어온 태그가 도형 기하요소인데 현재 객체에 남은 path가 없다면, 도형을 가진 다음 객체로 자동 전진
+      while (vIndex < visualObjs.length - 1 && visualObjs[vIndex].pathCount <= 0) {
+        vIndex++;
+      }
+      setupObj(vIndex);
+    }
+
     const currentObj = visualObjs[vIndex];
     if (!currentObj) return match;
 
